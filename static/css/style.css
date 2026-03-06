@@ -430,6 +430,24 @@ html, body {
     background: rgba(59, 130, 246, 0.15);
 }
 
+/* === Mobile Keyboard Input === */
+.mobile-kb-input {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    font-size: 16px; /* prevents iOS zoom on focus */
+}
+
+#mobile-kb-btn.active,
+#fs-kb-btn.active {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: var(--success);
+    color: var(--success);
+}
+
 .control-divider {
     width: 1px;
     height: 24px;
@@ -520,6 +538,14 @@ body.fullscreen .desktop-container {
     opacity: 0;
     transition: opacity 0.25s ease;
     pointer-events: none;
+    max-width: 95vw;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+}
+
+#toolbar-shortcuts,
+#fs-shortcuts {
+    display: contents;
 }
 
 body.fullscreen .fs-toolbar {
@@ -1078,6 +1104,101 @@ body.fullscreen .fs-toolbar:hover {
     color: var(--primary);
     width: 40px;
     text-align: right;
+}
+
+/* === Quick Shortcuts Settings === */
+.shortcuts-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+}
+
+.shortcuts-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 14px;
+    min-height: 20px;
+}
+
+.shortcut-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-light);
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.shortcut-tag .sc-remove {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    border-radius: 3px;
+}
+
+.shortcut-tag .sc-remove:hover {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.shortcut-add-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.shortcut-mod-toggles {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.shortcut-mod-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.shortcut-mod-label input[type="checkbox"] {
+    accent-color: var(--primary);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
+}
+
+.shortcut-key-row {
+    display: flex;
+    gap: 8px;
+}
+
+.shortcut-key-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 13px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    outline: none;
+}
+
+.shortcut-key-input:focus {
+    border-color: var(--primary);
 }
 
 /* === Notification Toast === */

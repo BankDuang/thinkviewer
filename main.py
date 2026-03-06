@@ -13,6 +13,7 @@ import sqlite3
 import asyncio
 import base64
 import io
+import time
 import platform
 import shutil
 from pathlib import Path
@@ -186,6 +187,8 @@ class ScreenStreamer:
         self.running = False
         self.screen_width = 0
         self.screen_height = 0
+        self.last_key_time = 0.0
+        self.modifiers_dirty = False
 
     def _draw_cursor(self, pil_img):
         """Draw mouse cursor overlay on the captured image."""
@@ -252,6 +255,15 @@ class ScreenStreamer:
                         except Exception as e:
                             print(f"Capture error: {e}")
 
+                    # Auto-release stuck modifier keys after 2s of no key activity
+                    if self.modifiers_dirty and time.time() - self.last_key_time > 2.0:
+                        for key in ("ctrl", "alt", "shift", "command"):
+                            try:
+                                pyautogui.keyUp(key, _pause=False)
+                            except Exception:
+                                pass
+                        self.modifiers_dirty = False
+
                     await asyncio.sleep(1.0 / self.fps)
         except asyncio.CancelledError:
             pass
@@ -287,7 +299,8 @@ def handle_input(data):
 
         elif event_type == "mouse_dblclick":
             x, y = int(data["x"] * sw), int(data["y"] * sh)
-            pyautogui.doubleClick(x, y, _pause=False)
+            # Only do one click - the first click already happened via mouse_down/mouse_up
+            pyautogui.click(x, y, _pause=False)
 
         elif event_type == "mouse_down":
             x, y = int(data["x"] * sw), int(data["y"] * sh)
@@ -305,6 +318,8 @@ def handle_input(data):
             key = data.get("key", "")
             if key:
                 pyautogui.press(key, _pause=False)
+                streamer.last_key_time = time.time()
+                streamer.modifiers_dirty = True
 
         elif event_type == "key_combo":
             keys = data.get("keys", [])
@@ -319,6 +334,8 @@ def handle_input(data):
                             pyautogui.keyUp(m, _pause=False)
                         except Exception:
                             pass
+                streamer.last_key_time = time.time()
+                streamer.modifiers_dirty = True
 
         elif event_type == "type_text":
             text = data.get("text", "")

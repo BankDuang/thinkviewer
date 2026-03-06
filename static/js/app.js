@@ -163,6 +163,7 @@ function navigate(page) {
     }
     if (page === 'settings') {
         loadDeviceInfo();
+        renderShortcutsList();
     }
 }
 
@@ -728,6 +729,174 @@ function sendVkCombo(keys) {
     sendControl({ type: 'key_combo', keys });
     showNotification('Sent: ' + keys.join('+'), 'info');
 }
+
+// === Quick Shortcuts ===
+const DEFAULT_SHORTCUTS = [
+    { keys: ['ctrl', 'd'], label: 'Ctrl+D' },
+    { keys: ['command', 'd'], label: 'Cmd+D' },
+    { keys: ['command', 'ctrl', 'd'], label: 'Cmd+Ctrl+D' },
+    { keys: ['command', 'alt', 'd'], label: 'Cmd+Opt+D' },
+    { keys: ['f11'], label: 'F11' },
+];
+
+function loadShortcuts() {
+    try {
+        const saved = localStorage.getItem('tv_shortcuts');
+        if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return DEFAULT_SHORTCUTS;
+}
+
+function saveShortcuts(shortcuts) {
+    localStorage.setItem('tv_shortcuts', JSON.stringify(shortcuts));
+}
+
+function shortcutLabel(keys) {
+    const names = { ctrl: 'Ctrl', command: 'Cmd', alt: 'Opt', shift: 'Shift' };
+    return keys.map(k => names[k] || k.charAt(0).toUpperCase() + k.slice(1)).join('+');
+}
+
+function renderToolbarShortcuts() {
+    const shortcuts = loadShortcuts();
+    // Main toolbar
+    const container = document.getElementById('toolbar-shortcuts');
+    if (container) {
+        container.innerHTML = shortcuts.map(s =>
+            `<button class="btn btn-sm vk-combo" onclick="sendVkCombo(${JSON.stringify(s.keys).replace(/"/g, '&quot;')})">${escapeHtml(s.label)}</button>`
+        ).join('');
+    }
+    // Fullscreen toolbar
+    const fsContainer = document.getElementById('fs-shortcuts');
+    if (fsContainer) {
+        fsContainer.innerHTML = shortcuts.map(s =>
+            `<button class="btn btn-sm vk-combo" onclick="sendVkCombo(${JSON.stringify(s.keys).replace(/"/g, '&quot;')})">${escapeHtml(s.label)}</button>`
+        ).join('');
+    }
+}
+
+function renderShortcutsList() {
+    const shortcuts = loadShortcuts();
+    const list = document.getElementById('shortcuts-list');
+    if (!list) return;
+    if (shortcuts.length === 0) {
+        list.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">No shortcuts defined</span>';
+        return;
+    }
+    list.innerHTML = shortcuts.map((s, i) =>
+        `<span class="shortcut-tag">${escapeHtml(s.label)}<button class="sc-remove" onclick="removeShortcut(${i})">&times;</button></span>`
+    ).join('');
+}
+
+function addShortcut() {
+    const keyInput = document.getElementById('sc-key-input');
+    const key = keyInput.value.trim().toLowerCase();
+    if (!key) {
+        showNotification('Enter a key', 'error');
+        return;
+    }
+
+    const mods = [];
+    if (document.getElementById('sc-mod-ctrl').checked) mods.push('ctrl');
+    if (document.getElementById('sc-mod-command').checked) mods.push('command');
+    if (document.getElementById('sc-mod-alt').checked) mods.push('alt');
+    if (document.getElementById('sc-mod-shift').checked) mods.push('shift');
+
+    const keys = [...mods, key];
+    const label = shortcutLabel(keys);
+
+    const shortcuts = loadShortcuts();
+    // Prevent duplicates
+    if (shortcuts.some(s => s.label === label)) {
+        showNotification('Shortcut already exists', 'error');
+        return;
+    }
+
+    shortcuts.push({ keys, label });
+    saveShortcuts(shortcuts);
+
+    // Reset form
+    keyInput.value = '';
+    document.getElementById('sc-mod-ctrl').checked = false;
+    document.getElementById('sc-mod-command').checked = false;
+    document.getElementById('sc-mod-alt').checked = false;
+    document.getElementById('sc-mod-shift').checked = false;
+
+    renderShortcutsList();
+    renderToolbarShortcuts();
+    showNotification('Shortcut added: ' + label, 'success');
+}
+
+function removeShortcut(index) {
+    const shortcuts = loadShortcuts();
+    const removed = shortcuts.splice(index, 1);
+    saveShortcuts(shortcuts);
+    renderShortcutsList();
+    renderToolbarShortcuts();
+    if (removed[0]) showNotification('Removed: ' + removed[0].label, 'info');
+}
+
+// Init shortcuts on page load
+document.addEventListener('DOMContentLoaded', () => {
+    renderToolbarShortcuts();
+    renderShortcutsList();
+});
+
+// === Mobile On-Screen Keyboard ===
+let mobileKbActive = false;
+
+function toggleMobileKeyboard() {
+    const input = document.getElementById('mobile-kb-input');
+    mobileKbActive = !mobileKbActive;
+
+    if (mobileKbActive) {
+        input.focus();
+    } else {
+        input.blur();
+    }
+
+    // Update both toolbar and fullscreen KB buttons
+    const btn = document.getElementById('mobile-kb-btn');
+    const fsBtn = document.getElementById('fs-kb-btn');
+    if (btn) btn.classList.toggle('active', mobileKbActive);
+    if (fsBtn) fsBtn.classList.toggle('active', mobileKbActive);
+}
+
+(function initMobileKeyboard() {
+    const input = document.getElementById('mobile-kb-input');
+    if (!input) return;
+
+    // Send each typed character as a key press
+    input.addEventListener('input', (e) => {
+        const data = e.data;
+        if (data) {
+            for (const ch of data) {
+                sendControl({ type: 'key_press', key: ch });
+            }
+        }
+        // Keep input empty so next keystroke is detectable
+        input.value = '';
+    });
+
+    // Handle special keys (backspace, enter, arrows, etc.)
+    input.addEventListener('keydown', (e) => {
+        const special = KEY_MAP[e.key];
+        if (special) {
+            e.preventDefault();
+            sendControl({ type: 'key_press', key: special });
+            return;
+        }
+        // Let normal characters go through the 'input' event
+    });
+
+    // Detect when keyboard is dismissed
+    input.addEventListener('blur', () => {
+        mobileKbActive = false;
+        const btn = document.getElementById('mobile-kb-btn');
+        const fsBtn = document.getElementById('fs-kb-btn');
+        if (btn) btn.classList.remove('active');
+        if (fsBtn) fsBtn.classList.remove('active');
+    });
+})();
 
 function sendTextPrompt() {
     document.getElementById('text-dialog').classList.remove('hidden');

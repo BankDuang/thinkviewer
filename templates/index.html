@@ -129,11 +129,17 @@
                                 Enable Control
                             </button>
                             <div class="control-divider"></div>
-                            <button class="btn btn-sm vk-combo" onclick="sendVkCombo(['ctrl','d'])">Ctrl+D</button>
-                            <button class="btn btn-sm vk-combo" onclick="sendVkCombo(['command','d'])">Cmd+D</button>
-                            <button class="btn btn-sm vk-combo" onclick="sendVkCombo(['command','ctrl','d'])">Cmd+Ctrl+D</button>
-                            <button class="btn btn-sm vk-combo" onclick="sendVkCombo(['f11'])">F11</button>
+                            <span id="toolbar-shortcuts"></span>
                             <div class="control-divider"></div>
+                            <button class="btn btn-sm" id="mobile-kb-btn" onclick="toggleMobileKeyboard()" title="Open Keyboard">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                                    <line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/>
+                                    <line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/>
+                                    <line x1="8" y1="16" x2="16" y2="16"/>
+                                </svg>
+                                KB
+                            </button>
                             <button class="btn btn-sm" onclick="sendTextPrompt()" title="Send Text">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <line x1="17" y1="10" x2="3" y2="10"/>
@@ -169,6 +175,9 @@
                             </button>
                         </div>
                     </div>
+                    <!-- Hidden input to trigger mobile on-screen keyboard -->
+                    <input type="text" id="mobile-kb-input" class="mobile-kb-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
                     <div class="desktop-container" id="desktop-container">
                         <div class="canvas-wrapper" id="canvas-wrapper">
                             <canvas id="remote-canvas"></canvas>
@@ -183,6 +192,8 @@
                         <button class="btn btn-sm" onclick="toggleControl()">
                             <span id="fs-control-label">Control OFF</span>
                         </button>
+                        <button class="btn btn-sm" id="fs-kb-btn" onclick="toggleMobileKeyboard()">KB</button>
+                        <span id="fs-shortcuts"></span>
                         <button class="btn btn-sm" onclick="zoomOut()">-</button>
                         <span class="zoom-label" id="fs-zoom-label">Fit</span>
                         <button class="btn btn-sm" onclick="zoomIn()">+</button>
@@ -376,6 +387,31 @@
                                 <span class="setting-value" id="scale-value">100%</span>
                             </div>
                             <button class="btn btn-sm btn-primary" onclick="applyStreamSettings()" style="margin-top:12px">Apply</button>
+                        </div>
+
+                        <div class="settings-card wide">
+                            <div class="card-header">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                                    <line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/>
+                                    <line x1="8" y1="16" x2="16" y2="16"/>
+                                </svg>
+                                <h3>Quick Shortcuts</h3>
+                            </div>
+                            <p class="shortcuts-hint">Add key combos that appear in the desktop toolbar.</p>
+                            <div id="shortcuts-list" class="shortcuts-list"></div>
+                            <div class="shortcut-add-row">
+                                <div class="shortcut-mod-toggles">
+                                    <label class="shortcut-mod-label"><input type="checkbox" id="sc-mod-ctrl"> Ctrl</label>
+                                    <label class="shortcut-mod-label"><input type="checkbox" id="sc-mod-command"> Cmd</label>
+                                    <label class="shortcut-mod-label"><input type="checkbox" id="sc-mod-alt"> Alt/Opt</label>
+                                    <label class="shortcut-mod-label"><input type="checkbox" id="sc-mod-shift"> Shift</label>
+                                </div>
+                                <div class="shortcut-key-row">
+                                    <input type="text" id="sc-key-input" placeholder="Key (e.g. d, f11, space)" class="shortcut-key-input" onkeydown="if(event.key==='Enter')addShortcut()">
+                                    <button class="btn btn-sm btn-primary" onclick="addShortcut()">Add</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
