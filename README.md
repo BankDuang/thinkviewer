@@ -57,7 +57,20 @@ ThinkViewer is a lightweight, browser-based remote desktop control application. 
 
 ## Screenshots
 
-*(Add screenshots from the `screenshots/` directory here to showcase the app)*
+### 1. Login Page
+![Login Page](screenshots/01_login_page.png)
+
+### 2. Desktop View
+![Desktop View](screenshots/02_desktop_view.png)
+
+### 3. File Manager
+![File Manager](screenshots/05_file_manager.png)
+
+### 4. Terminal View
+![Terminal View](screenshots/03_terminal_view.png)
+
+### 5. Settings Page
+![Settings Page](screenshots/06_settings_page.png)
 
 ## Technology Stack
 
