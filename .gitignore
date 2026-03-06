@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+thinkviewer.db
+
+# Node
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local uploads and screenshots
+uploads/
+screenshots/
+*.png
+!screenshots/README.md # Keep directory if needed, but usually we ignore screenshots unless intended.
+# Actually, the user has many screenshots in screenshots/, maybe they want them? 
+# I'll include the screenshots folder but ignore the ones in the root.

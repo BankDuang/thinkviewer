@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ThinkViewer</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- ============ LOGIN VIEW ============ -->
+        <div id="login-view" class="view active">
+            <div class="login-bg"></div>
+            <div class="login-container">
+                <div class="login-card">
+                    <div class="login-logo">
+                        <div class="logo-icon-large">
+                            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                                <rect x="4" y="6" width="40" height="28" rx="4" stroke="#3b82f6" stroke-width="3"/>
+                                <line x1="16" y1="38" x2="32" y2="38" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+                                <line x1="24" y1="34" x2="24" y2="38" stroke="#3b82f6" stroke-width="3"/>
+                                <circle cx="24" cy="20" r="6" stroke="#60a5fa" stroke-width="2" stroke-dasharray="3 3"/>
+                                <path d="M18 20 L24 14 L30 20 L24 26Z" fill="#3b82f6" opacity="0.3"/>
+                            </svg>
+                        </div>
+                        <h1>ThinkViewer</h1>
+                        <p class="subtitle">Remote Desktop Control</p>
+                    </div>
+                    <form id="login-form" onsubmit="return false;">
+                        <div class="input-group">
+                            <label for="password-input">Access Password</label>
+                            <div class="input-wrapper">
+                                <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2"/>
+                                    <path d="M7 11V7a5 5 0 0110 0v4"/>
+                                </svg>
+                                <input type="password" id="password-input" placeholder="Enter password" autocomplete="off">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block" id="login-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+                                <polyline points="10 17 15 12 10 7"/>
+                                <line x1="15" y1="12" x2="3" y2="12"/>
+                            </svg>
+                            Connect
+                        </button>
+                        <div id="login-error" class="error-msg hidden"></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ MAIN VIEW ============ -->
+        <div id="main-view" class="view hidden">
+            <!-- Sidebar -->
+            <nav class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <div class="sidebar-logo">
+                        <svg width="28" height="28" viewBox="0 0 48 48" fill="none">
+                            <rect x="4" y="6" width="40" height="28" rx="4" stroke="#3b82f6" stroke-width="3"/>
+                            <line x1="16" y1="38" x2="32" y2="38" stroke="#3b82f6" stroke-width="3" stroke-linecap="round"/>
+                            <line x1="24" y1="34" x2="24" y2="38" stroke="#3b82f6" stroke-width="3"/>
+                        </svg>
+                        <span class="logo-text">ThinkViewer</span>
+                    </div>
+                </div>
+
+                <div class="nav-items">
+                    <a class="nav-item active" data-page="desktop" onclick="navigate('desktop')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
+                        </svg>
+                        <span>Desktop</span>
+                    </a>
+                    <a class="nav-item" data-page="terminal" onclick="navigate('terminal')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="4 17 10 11 4 5"/>
+                            <line x1="12" y1="19" x2="20" y2="19"/>
+                        </svg>
+                        <span>Terminal</span>
+                    </a>
+                    <a class="nav-item" data-page="files" onclick="navigate('files')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+                        </svg>
+                        <span>Files</span>
+                    </a>
+                    <a class="nav-item" data-page="settings" onclick="navigate('settings')">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"/>
+                            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+                        </svg>
+                        <span>Settings</span>
+                    </a>
+                </div>
+
+                <div class="sidebar-footer">
+                    <div class="connection-info">
+                        <span class="status-dot online"></span>
+                        <span id="client-count">1 connected</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-danger" onclick="logout()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                        Disconnect
+                    </button>
+                </div>
+            </nav>
+
+            <!-- Content -->
+            <main class="content">
+                <!-- Desktop Page -->
+                <div id="desktop-page" class="page active">
+                    <div class="page-header">
+                        <h2>Remote Desktop</h2>
+                        <div class="desktop-controls">
+                            <button class="btn btn-sm btn-control" id="control-toggle" onclick="toggleControl()">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                    <path d="M2 17l10 5 10-5"/>
+                                    <path d="M2 12l10 5 10-5"/>
+                                </svg>
+                                Enable Control
+                            </button>
+                            <div class="control-divider"></div>
+                            <button class="btn btn-sm" id="keys-panel-toggle" onclick="toggleKeysPanel()" title="Virtual Keyboard">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="2" y="4" width="20" height="16" rx="2"/>
+                                    <line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/>
+                                    <line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/><line x1="14" y1="12" x2="14.01" y2="12"/><line x1="18" y1="12" x2="18.01" y2="12"/>
+                                    <line x1="8" y1="16" x2="16" y2="16"/>
+                                </svg>
+                                Keys
+                            </button>
+                            <button class="btn btn-sm" onclick="sendTextPrompt()" title="Send Text">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="17" y1="10" x2="3" y2="10"/>
+                                    <line x1="21" y1="6" x2="3" y2="6"/>
+                                    <line x1="21" y1="14" x2="3" y2="14"/>
+                                    <line x1="17" y1="18" x2="3" y2="18"/>
+                                </svg>
+                            </button>
+                            <select id="quality-select" onchange="updateQualityFromToolbar()" class="toolbar-select">
+                                <option value="30">Low</option>
+                                <option value="50">Medium</option>
+                                <option value="75" selected>High</option>
+                                <option value="100">Best</option>
+                            </select>
+                            <div class="control-divider"></div>
+                            <button class="btn btn-sm" onclick="zoomOut()" title="Zoom Out">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/>
+                                </svg>
+                            </button>
+                            <span class="zoom-label" id="zoom-label">Fit</span>
+                            <button class="btn btn-sm" onclick="zoomIn()" title="Zoom In">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+                                </svg>
+                            </button>
+                            <button class="btn btn-sm" onclick="zoomFit()" title="Fit to window">Fit</button>
+                            <div class="control-divider"></div>
+                            <button class="btn btn-sm" id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Virtual Keys Panel -->
+                    <div id="keys-panel" class="keys-panel hidden">
+                        <div class="keys-section">
+                            <span class="keys-section-label">Modifiers (toggle)</span>
+                            <div class="keys-row">
+                                <button class="vk-btn vk-mod" data-mod="ctrl" onclick="toggleVkMod('ctrl')">Ctrl</button>
+                                <button class="vk-btn vk-mod" data-mod="command" onclick="toggleVkMod('command')">Cmd</button>
+                                <button class="vk-btn vk-mod" data-mod="alt" onclick="toggleVkMod('alt')">Alt</button>
+                                <button class="vk-btn vk-mod" data-mod="shift" onclick="toggleVkMod('shift')">Shift</button>
+                            </div>
+                        </div>
+                        <div class="keys-divider"></div>
+                        <div class="keys-section">
+                            <span class="keys-section-label">Common Keys</span>
+                            <div class="keys-row">
+                                <button class="vk-btn" onclick="sendVk('escape')">Esc</button>
+                                <button class="vk-btn" onclick="sendVk('tab')">Tab</button>
+                                <button class="vk-btn" onclick="sendVk('enter')">Enter</button>
+                                <button class="vk-btn" onclick="sendVk('space')">Space</button>
+                                <button class="vk-btn" onclick="sendVk('backspace')">Bksp</button>
+                                <button class="vk-btn" onclick="sendVk('delete')">Del</button>
+                            </div>
+                        </div>
+                        <div class="keys-divider"></div>
+                        <div class="keys-section">
+                            <span class="keys-section-label">Navigation</span>
+                            <div class="keys-row">
+                                <button class="vk-btn" onclick="sendVk('up')">Up</button>
+                                <button class="vk-btn" onclick="sendVk('down')">Down</button>
+                                <button class="vk-btn" onclick="sendVk('left')">Left</button>
+                                <button class="vk-btn" onclick="sendVk('right')">Right</button>
+                                <button class="vk-btn" onclick="sendVk('home')">Home</button>
+                                <button class="vk-btn" onclick="sendVk('end')">End</button>
+                                <button class="vk-btn" onclick="sendVk('pageup')">PgUp</button>
+                                <button class="vk-btn" onclick="sendVk('pagedown')">PgDn</button>
+                            </div>
+                        </div>
+                        <div class="keys-divider"></div>
+                        <div class="keys-section">
+                            <span class="keys-section-label">Function Keys</span>
+                            <div class="keys-row">
+                                <button class="vk-btn vk-fn" onclick="sendVk('f1')">F1</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f2')">F2</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f3')">F3</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f4')">F4</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f5')">F5</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f6')">F6</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f7')">F7</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f8')">F8</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f9')">F9</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f10')">F10</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f11')">F11</button>
+                                <button class="vk-btn vk-fn" onclick="sendVk('f12')">F12</button>
+                            </div>
+                        </div>
+                        <div class="keys-divider"></div>
+                        <div class="keys-section">
+                            <span class="keys-section-label">Quick Combos</span>
+                            <div class="keys-row">
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','c'])">Ctrl+C</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','v'])">Ctrl+V</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','z'])">Ctrl+Z</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','a'])">Ctrl+A</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','s'])">Ctrl+S</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','f'])">Ctrl+F</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','c'])">Cmd+C</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','v'])">Cmd+V</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','z'])">Cmd+Z</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','a'])">Cmd+A</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','s'])">Cmd+S</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['command','q'])">Cmd+Q</button>
+                                <button class="vk-btn vk-combo" onclick="sendVkCombo(['ctrl','alt','delete'])">C+A+Del</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="desktop-container" id="desktop-container">
+                        <div class="canvas-wrapper" id="canvas-wrapper">
+                            <canvas id="remote-canvas"></canvas>
+                        </div>
+                        <div id="no-stream" class="no-stream">
+                            <div class="spinner"></div>
+                            <p>Connecting to stream...</p>
+                        </div>
+                    </div>
+                    <!-- Floating toolbar for fullscreen mode -->
+                    <div id="fs-toolbar" class="fs-toolbar hidden">
+                        <button class="btn btn-sm" onclick="toggleControl()">
+                            <span id="fs-control-label">Control OFF</span>
+                        </button>
+                        <button class="btn btn-sm" onclick="zoomOut()">-</button>
+                        <span class="zoom-label" id="fs-zoom-label">Fit</span>
+                        <button class="btn btn-sm" onclick="zoomIn()">+</button>
+                        <button class="btn btn-sm" onclick="zoomFit()">Fit</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="toggleFullscreen()">Exit</button>
+                    </div>
+                </div>
+
+                <!-- Terminal Page -->
+                <div id="terminal-page" class="page hidden">
+                    <div class="page-header">
+                        <h2>Terminal</h2>
+                        <div class="terminal-controls">
+                            <button class="btn btn-sm" onclick="clearTerminal()">Clear</button>
+                        </div>
+                    </div>
+                    <div class="terminal-container">
+                        <div id="terminal-output" class="terminal-output"></div>
+                        <div class="terminal-input-row">
+                            <span class="terminal-prompt">$</span>
+                            <input type="text" id="terminal-input" placeholder="Enter command..." autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Files Page (FileZilla-style split pane) -->
+                <div id="files-page" class="page hidden">
+                    <div class="page-header">
+                        <h2>File Manager</h2>
+                    </div>
+                    <!-- Transfer log -->
+                    <div class="transfer-log" id="transfer-log">
+                        <div class="transfer-log-inner" id="transfer-log-inner"></div>
+                    </div>
+                    <div class="fz-split">
+                        <!-- LEFT: Client (Local/Browser) -->
+                        <div class="fz-pane fz-client">
+                            <div class="fz-pane-header">
+                                <span class="fz-pane-title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                                    Client (Your Browser)
+                                </span>
+                                <label class="btn btn-xs btn-primary upload-label">
+                                    + Add Files
+                                    <input type="file" id="client-file-input" onchange="addClientFiles(event)" hidden multiple>
+                                </label>
+                            </div>
+                            <div class="fz-drop-zone" id="client-drop-zone">
+                                <div class="fz-drop-hint" id="client-drop-hint">
+                                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+                                        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                    </svg>
+                                    <span>Drop files here or click "Add Files"</span>
+                                </div>
+                                <div class="fz-file-list" id="client-file-list"></div>
+                            </div>
+                            <div class="fz-pane-footer">
+                                <span id="client-file-count">0 files</span>
+                                <button class="btn btn-xs btn-primary" onclick="uploadAllToDevice()" id="upload-all-btn" disabled>
+                                    Upload to Device >>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- CENTER: Transfer buttons -->
+                        <div class="fz-transfer-bar">
+                            <button class="btn btn-sm btn-primary" onclick="uploadAllToDevice()" title="Upload selected to device">>></button>
+                            <button class="btn btn-sm btn-primary" onclick="downloadSelectedFromDevice()" title="Download selected from device"><<</button>
+                        </div>
+
+                        <!-- RIGHT: Device (Remote Server) -->
+                        <div class="fz-pane fz-device">
+                            <div class="fz-pane-header">
+                                <span class="fz-pane-title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                                    Device (Remote)
+                                </span>
+                                <div class="fz-device-btns">
+                                    <button class="btn btn-xs" onclick="navigateUp()" title="Parent directory">Up</button>
+                                    <button class="btn btn-xs" onclick="refreshFiles()" title="Refresh">Refresh</button>
+                                    <button class="btn btn-xs" onclick="showMkdirDialog()" title="New folder">+ Folder</button>
+                                </div>
+                            </div>
+                            <div class="fz-path-bar">
+                                <input type="text" id="current-path" value="~" onkeydown="if(event.key==='Enter')loadDirectory(this.value)">
+                            </div>
+                            <div class="fz-table-header">
+                                <span class="fz-col-name">Name</span>
+                                <span class="fz-col-size">Size</span>
+                                <span class="fz-col-modified">Modified</span>
+                                <span class="fz-col-actions"></span>
+                            </div>
+                            <div class="fz-file-list fz-device-list" id="device-file-list"
+                                 ondragover="deviceDragOver(event)" ondrop="deviceDrop(event)" ondragleave="deviceDragLeave(event)">
+                            </div>
+                            <div class="fz-pane-footer">
+                                <span id="device-file-count">0 items</span>
+                                <span id="device-path-short"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div id="settings-page" class="page hidden">
+                    <div class="page-header">
+                        <h2>Settings</h2>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="settings-card">
+                            <div class="card-header">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                    <rect x="2" y="3" width="20" height="14" rx="2"/>
+                                    <line x1="8" y1="21" x2="16" y2="21"/>
+                                    <line x1="12" y1="17" x2="12" y2="21"/>
+                                </svg>
+                                <h3>Device Information</h3>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Device ID</span>
+                                <span class="info-value" id="info-device-id">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Hostname</span>
+                                <span class="info-value" id="info-hostname">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Platform</span>
+                                <span class="info-value truncate" id="info-platform">---</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Resolution</span>
+                                <span class="info-value" id="info-resolution">---</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-card">
+                            <div class="card-header">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2"/>
+                                    <path d="M7 11V7a5 5 0 0110 0v4"/>
+                                </svg>
+                                <h3>Access Password</h3>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Current</span>
+                                <span class="info-value mono" id="info-password">------</span>
+                                <button class="btn btn-xs" id="pw-toggle-btn" onclick="togglePasswordVisibility()">Show</button>
+                            </div>
+                            <div class="password-change">
+                                <input type="password" id="new-password" placeholder="New password (min 4 chars)">
+                                <button class="btn btn-sm btn-primary" onclick="changePassword()">Update</button>
+                            </div>
+                        </div>
+
+                        <div class="settings-card wide">
+                            <div class="card-header">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                    <polygon points="23 7 16 12 23 17 23 7"/>
+                                    <rect x="1" y="5" width="15" height="14" rx="2"/>
+                                </svg>
+                                <h3>Stream Settings</h3>
+                            </div>
+                            <div class="setting-row">
+                                <label>Quality</label>
+                                <input type="range" id="setting-quality" min="10" max="100" value="75" oninput="updateSettingLabel('quality')">
+                                <span class="setting-value" id="quality-value">75%</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>FPS</label>
+                                <input type="range" id="setting-fps" min="1" max="30" value="12" oninput="updateSettingLabel('fps')">
+                                <span class="setting-value" id="fps-value">12</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>Scale</label>
+                                <input type="range" id="setting-scale" min="25" max="150" value="100" oninput="updateSettingLabel('scale')">
+                                <span class="setting-value" id="scale-value">100%</span>
+                            </div>
+                            <button class="btn btn-sm btn-primary" onclick="applyStreamSettings()" style="margin-top:12px">Apply</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="notification" class="notification hidden">
+        <span id="notification-icon"></span>
+        <span id="notification-text"></span>
+    </div>
+
+    <!-- Mkdir Dialog -->
+    <div id="mkdir-dialog" class="dialog-overlay hidden" onclick="if(event.target===this)closeMkdirDialog()">
+        <div class="dialog">
+            <h3>Create New Folder</h3>
+            <input type="text" id="mkdir-name" placeholder="Folder name" onkeydown="if(event.key==='Enter')createDirectory()">
+            <div class="dialog-actions">
+                <button class="btn btn-sm" onclick="closeMkdirDialog()">Cancel</button>
+                <button class="btn btn-sm btn-primary" onclick="createDirectory()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Send Text Dialog -->
+    <div id="text-dialog" class="dialog-overlay hidden" onclick="if(event.target===this)closeTextDialog()">
+        <div class="dialog">
+            <h3>Send Text to Remote</h3>
+            <textarea id="send-text-input" rows="4" placeholder="Type text to send..."></textarea>
+            <div class="dialog-actions">
+                <button class="btn btn-sm" onclick="closeTextDialog()">Cancel</button>
+                <button class="btn btn-sm btn-primary" onclick="sendText()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
