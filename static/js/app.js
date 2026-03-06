@@ -365,6 +365,28 @@ function canvasToNormalized(e) {
     };
 }
 
+function touchToNormalized(touch) {
+    const canvas = document.getElementById('remote-canvas');
+    const rect = canvas.getBoundingClientRect();
+    return {
+        x: Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height)),
+    };
+}
+
+function getTouchDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getTouchCenter(touches) {
+    return {
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
+}
+
 function setupCanvasEvents() {
     if (canvasEventsSetup) return;
     canvasEventsSetup = true;
@@ -383,6 +405,9 @@ function setupCanvasEvents() {
     });
 
     let isDragging = false;
+    let lastMouseDownTime = 0;
+    let lastMouseDownPos = null;
+    let skipNextMouseUp = false;
 
     canvas.addEventListener('mousedown', (e) => {
         if (!state.controlling) {
@@ -396,11 +421,28 @@ function setupCanvasEvents() {
             return;
         }
         e.preventDefault();
+        const pos = canvasToNormalized(e);
+        const btn = ['left', 'middle', 'right'][e.button] || 'left';
+        const now = Date.now();
+
+        // Detect double-click: two mousedowns within 400ms at same position
+        if (btn === 'left' && now - lastMouseDownTime < 400 && lastMouseDownPos) {
+            const dx = Math.abs(pos.x - lastMouseDownPos.x);
+            const dy = Math.abs(pos.y - lastMouseDownPos.y);
+            if (dx < 0.03 && dy < 0.03) {
+                sendControl({ type: 'mouse_dblclick', ...pos });
+                lastMouseDownTime = 0;
+                lastMouseDownPos = null;
+                isDragging = false;
+                skipNextMouseUp = true;
+                return;
+            }
+        }
+
         isDragging = true;
-        sendControl({
-            type: 'mouse_down', ...canvasToNormalized(e),
-            button: ['left', 'middle', 'right'][e.button] || 'left',
-        });
+        sendControl({ type: 'mouse_down', ...pos, button: btn });
+        lastMouseDownTime = now;
+        lastMouseDownPos = pos;
     });
 
     // Panning move (when not controlling)
@@ -423,7 +465,11 @@ function setupCanvasEvents() {
 
     canvas.addEventListener('mouseup', (e) => {
         if (!state.controlling) return;
-        const wasDragging = isDragging;
+        if (skipNextMouseUp) {
+            skipNextMouseUp = false;
+            isDragging = false;
+            return;
+        }
         isDragging = false;
         sendControl({
             type: 'mouse_up', ...canvasToNormalized(e),
@@ -431,16 +477,9 @@ function setupCanvasEvents() {
         });
     });
 
-    // Only send click if it wasn't a drag operation
-    canvas.addEventListener('click', (e) => {
-        // click events are handled via mousedown + mouseup for proper drag support
-    });
-
-    canvas.addEventListener('dblclick', (e) => {
-        if (!state.controlling) return;
-        e.preventDefault();
-        sendControl({ type: 'mouse_dblclick', ...canvasToNormalized(e) });
-    });
+    // Suppress browser click/dblclick - handled via mousedown detection
+    canvas.addEventListener('click', (e) => { if (state.controlling) e.preventDefault(); });
+    canvas.addEventListener('dblclick', (e) => { if (state.controlling) e.preventDefault(); });
 
     canvas.addEventListener('wheel', (e) => {
         // Ctrl+scroll = zoom
@@ -467,6 +506,149 @@ function setupCanvasEvents() {
     // Keyboard events on document when controlling
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
+
+    // === Touch Events (mobile/tablet) ===
+    const touchState = {
+        startTime: 0,
+        startPos: null,
+        moved: false,
+        dragging: false,
+        pinching: false,
+        lastDist: 0,
+        lastCenter: null,
+        longPressTimer: null,
+    };
+    let lastTapTime = 0;
+    let tapClickTimer = null;
+    let pendingTapPos = null;
+
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+
+        if (e.touches.length === 1) {
+            touchState.startTime = Date.now();
+            touchState.startPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            touchState.moved = false;
+            touchState.dragging = false;
+
+            if (state.controlling) {
+                const pos = touchToNormalized(e.touches[0]);
+                sendControl({ type: 'mouse_move', ...pos });
+
+                // Long press = right-click
+                touchState.longPressTimer = setTimeout(() => {
+                    if (!touchState.moved) {
+                        sendControl({ type: 'mouse_click', ...pos, button: 'right' });
+                        touchState.startPos = null; // Cancel tap on touchend
+                    }
+                }, 600);
+            } else if (state.zoom !== 0) {
+                // Pan when not controlling
+                state.isPanning = true;
+                state.panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                state.scrollStart = { x: container.scrollLeft, y: container.scrollTop };
+            }
+        } else if (e.touches.length === 2) {
+            clearTimeout(touchState.longPressTimer);
+            touchState.pinching = true;
+            touchState.dragging = false;
+            touchState.lastDist = getTouchDistance(e.touches);
+            touchState.lastCenter = getTouchCenter(e.touches);
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+
+        if (e.touches.length === 1 && !touchState.pinching) {
+            if (state.controlling && touchState.startPos) {
+                const dx = Math.abs(e.touches[0].clientX - touchState.startPos.x);
+                const dy = Math.abs(e.touches[0].clientY - touchState.startPos.y);
+
+                if (dx > 8 || dy > 8) {
+                    touchState.moved = true;
+                    clearTimeout(touchState.longPressTimer);
+
+                    if (!touchState.dragging) {
+                        touchState.dragging = true;
+                        const sp = touchToNormalized({ clientX: touchState.startPos.x, clientY: touchState.startPos.y });
+                        sendControl({ type: 'mouse_down', ...sp, button: 'left' });
+                    }
+
+                    const pos = touchToNormalized(e.touches[0]);
+                    sendControl({ type: 'mouse_move', ...pos });
+                }
+            } else if (state.isPanning) {
+                const dx = e.touches[0].clientX - state.panStart.x;
+                const dy = e.touches[0].clientY - state.panStart.y;
+                container.scrollLeft = state.scrollStart.x - dx;
+                container.scrollTop = state.scrollStart.y - dy;
+            }
+        } else if (e.touches.length === 2 && touchState.pinching) {
+            const dist = getTouchDistance(e.touches);
+            const center = getTouchCenter(e.touches);
+
+            if (touchState.lastDist > 0) {
+                const ratio = dist / touchState.lastDist;
+                if (ratio > 1.08) { zoomIn(); touchState.lastDist = dist; }
+                else if (ratio < 0.92) { zoomOut(); touchState.lastDist = dist; }
+            }
+
+            if (touchState.lastCenter) {
+                container.scrollLeft -= (center.x - touchState.lastCenter.x);
+                container.scrollTop -= (center.y - touchState.lastCenter.y);
+            }
+            touchState.lastCenter = center;
+        }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        clearTimeout(touchState.longPressTimer);
+
+        if (state.controlling && touchState.startPos && !touchState.pinching) {
+            const touch = e.changedTouches[0];
+
+            if (touchState.dragging) {
+                const pos = touchToNormalized(touch);
+                sendControl({ type: 'mouse_up', ...pos, button: 'left' });
+            } else if (!touchState.moved) {
+                const dt = Date.now() - touchState.startTime;
+                if (dt < 500) {
+                    const pos = touchToNormalized(touch);
+                    const now = Date.now();
+                    if (tapClickTimer && now - lastTapTime < 400) {
+                        // Double-tap: cancel pending single click, send dblclick
+                        clearTimeout(tapClickTimer);
+                        tapClickTimer = null;
+                        sendControl({ type: 'mouse_dblclick', ...pos });
+                        lastTapTime = 0;
+                    } else {
+                        // Single tap: delay to check for double-tap
+                        lastTapTime = now;
+                        pendingTapPos = pos;
+                        tapClickTimer = setTimeout(() => {
+                            sendControl({ type: 'mouse_click', ...pendingTapPos, button: 'left' });
+                            tapClickTimer = null;
+                        }, 250);
+                    }
+                }
+            }
+        }
+
+        if (state.isPanning) {
+            state.isPanning = false;
+        }
+
+        touchState.startPos = null;
+        touchState.dragging = false;
+
+        if (e.touches.length === 0) {
+            touchState.pinching = false;
+            touchState.lastDist = 0;
+            touchState.lastCenter = null;
+        }
+    }, { passive: false });
 }
 
 function handleKeyDown(e) {
@@ -481,8 +663,8 @@ function handleKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    // Don't send bare modifier keys alone, but we already prevented default above
-    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    // Don't send bare modifier/special keys alone
+    if (['Control', 'Alt', 'Shift', 'Meta', 'Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'].includes(e.key)) return;
 
     // Skip auto-repeated keys
     if (e.repeat) return;
@@ -541,42 +723,7 @@ function sendKeyCombo(keys) {
     showNotification('Sent: ' + keys.join('+'), 'info');
 }
 
-// === Virtual Keys Panel ===
-const vkModifiers = { ctrl: false, command: false, alt: false, shift: false };
-
-function toggleKeysPanel() {
-    const panel = document.getElementById('keys-panel');
-    const btn = document.getElementById('keys-panel-toggle');
-    panel.classList.toggle('hidden');
-    btn.classList.toggle('active');
-}
-
-function toggleVkMod(mod) {
-    vkModifiers[mod] = !vkModifiers[mod];
-    const btn = document.querySelector(`.vk-mod[data-mod="${mod}"]`);
-    btn.classList.toggle('armed', vkModifiers[mod]);
-}
-
-function clearVkMods() {
-    for (const mod of Object.keys(vkModifiers)) {
-        vkModifiers[mod] = false;
-    }
-    document.querySelectorAll('.vk-mod').forEach(b => b.classList.remove('armed'));
-}
-
-function sendVk(key) {
-    // Collect any armed modifiers
-    const mods = Object.keys(vkModifiers).filter(m => vkModifiers[m]);
-    if (mods.length > 0) {
-        sendControl({ type: 'key_combo', keys: [...mods, key] });
-        showNotification('Sent: ' + [...mods, key].join('+'), 'info');
-        clearVkMods();
-    } else {
-        sendControl({ type: 'key_press', key });
-        showNotification('Sent: ' + key, 'info');
-    }
-}
-
+// === Quick Combo Buttons ===
 function sendVkCombo(keys) {
     sendControl({ type: 'key_combo', keys });
     showNotification('Sent: ' + keys.join('+'), 'info');

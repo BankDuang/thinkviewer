@@ -411,115 +411,23 @@ html, body {
     flex-wrap: wrap;
 }
 
-/* === Virtual Keys Panel === */
-.keys-panel {
-    display: flex;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 8px 14px;
-    background: var(--bg-card);
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-    overflow-x: auto;
-    flex-wrap: wrap;
-}
-
-.keys-section {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-}
-
-.keys-section-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    writing-mode: vertical-lr;
-    transform: rotate(180deg);
-    margin-right: 2px;
-    user-select: none;
-}
-
-.keys-row {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-}
-
-.keys-divider {
-    width: 1px;
-    height: 32px;
-    background: var(--border);
-    align-self: center;
-    margin: 0 4px;
-    flex-shrink: 0;
-}
-
-.vk-btn {
-    padding: 5px 10px;
-    font-size: 11px;
-    font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    background: var(--bg-input);
-    border: 1px solid var(--border-light);
-    border-radius: 5px;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.12s ease;
-    white-space: nowrap;
-    user-select: none;
-    line-height: 1.4;
-}
-
-.vk-btn:hover {
-    background: var(--bg-card-hover);
-    color: var(--text);
-    border-color: rgba(255, 255, 255, 0.15);
-}
-
-.vk-btn:active {
-    transform: scale(0.95);
-    background: rgba(59, 130, 246, 0.15);
-}
-
-.vk-mod {
-    min-width: 44px;
-    text-align: center;
-    border-color: rgba(139, 92, 246, 0.3);
-    color: #a78bfa;
-}
-
-.vk-mod:hover {
-    border-color: rgba(139, 92, 246, 0.5);
-    background: rgba(139, 92, 246, 0.1);
-    color: #c4b5fd;
-}
-
-.vk-mod.armed {
-    background: rgba(139, 92, 246, 0.25);
-    border-color: #8b5cf6;
-    color: #e0d5ff;
-    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
-}
-
-.vk-fn {
-    padding: 5px 7px;
-    font-size: 10px;
-}
-
+/* === Quick Combo Buttons === */
 .vk-combo {
     border-color: rgba(59, 130, 246, 0.25);
     color: var(--primary);
-    font-size: 10px;
-    padding: 5px 8px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    font-weight: 600;
 }
 
 .vk-combo:hover {
     border-color: rgba(59, 130, 246, 0.5);
     background: rgba(59, 130, 246, 0.1);
+}
+
+.vk-combo:active {
+    transform: scale(0.95);
+    background: rgba(59, 130, 246, 0.15);
 }
 
 .control-divider {
@@ -1280,8 +1188,13 @@ body.fullscreen .fs-toolbar:hover {
     background: rgba(255, 255, 255, 0.2);
 }
 
-/* === Responsive === */
-@media (max-width: 900px) {
+/* === Utility === */
+.mobile-only {
+    display: none !important;
+}
+
+/* === Responsive - Tablet (<=1024px) === */
+@media (max-width: 1024px) {
     .sidebar {
         width: 60px;
         --sidebar-width: 60px;
@@ -1296,6 +1209,7 @@ body.fullscreen .fs-toolbar:hover {
     .nav-item {
         justify-content: center;
         padding: 14px;
+        border-left-width: 2px;
     }
 
     .content {
@@ -1306,13 +1220,272 @@ body.fullscreen .fs-toolbar:hover {
         grid-template-columns: 1fr;
     }
 
-    .file-table-header,
-    .file-entry {
-        grid-template-columns: 1fr 80px 100px;
+    /* File manager stacked */
+    .fz-split {
+        flex-direction: column;
     }
 
-    .file-col-actions,
-    .file-actions {
+    .fz-transfer-bar {
+        flex-direction: row;
+        width: 100%;
+        padding: 6px 12px;
+        border-left: none;
+        border-right: none;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        height: auto;
+    }
+
+    .fz-pane {
+        flex: 1;
+        min-height: 0;
+    }
+
+    .fz-table-header {
+        grid-template-columns: 1fr 70px 100px 36px;
+    }
+
+    .fz-entry {
+        grid-template-columns: 1fr 70px 100px 36px;
+    }
+}
+
+/* === Responsive - Mobile (<=768px) === */
+@media (max-width: 768px) {
+    .mobile-only {
+        display: block !important;
+    }
+
+    /* --- Bottom Tab Bar --- */
+    .sidebar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        top: auto;
+        width: 100% !important;
+        height: auto;
+        flex-direction: row;
+        border-right: none;
+        border-top: 1px solid var(--border);
+        z-index: 200;
+        --sidebar-width: 0px;
+    }
+
+    .sidebar-header,
+    .sidebar-footer {
         display: none;
+    }
+
+    .nav-items {
+        display: flex;
+        flex-direction: row;
+        padding: 0;
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .nav-item {
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 4px 6px;
+        border-left: none;
+        border-top: 2px solid transparent;
+        border-bottom: none;
+        font-size: 10px;
+        justify-content: center;
+        align-items: center;
+        min-width: 0;
+    }
+
+    .nav-item.active {
+        border-left-color: transparent;
+        border-top-color: var(--primary);
+        background: rgba(59, 130, 246, 0.06);
+    }
+
+    .nav-item span:last-child {
+        display: block;
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    .nav-item svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    /* --- Content Area --- */
+    .content {
+        margin-left: 0 !important;
+        padding-bottom: 52px;
+        height: 100vh;
+        height: 100dvh;
+    }
+
+    /* --- Page Header --- */
+    .page-header {
+        padding: 8px 12px;
+        gap: 6px;
+    }
+
+    .page-header h2 {
+        font-size: 14px;
+        white-space: nowrap;
+    }
+
+    /* --- Desktop Toolbar - horizontally scrollable --- */
+    .desktop-controls {
+        gap: 4px;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .desktop-controls::-webkit-scrollbar {
+        display: none;
+    }
+
+    .control-divider {
+        display: none;
+    }
+
+    .btn-sm {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    .toolbar-select {
+        padding: 6px 8px;
+        font-size: 12px;
+    }
+
+    /* --- Canvas - touch friendly --- */
+    .desktop-container {
+        touch-action: none;
+    }
+
+    /* --- File Manager --- */
+    .fz-pane-title {
+        font-size: 11px;
+    }
+
+    .fz-pane-header {
+        padding: 6px 8px;
+    }
+
+    .fz-device-btns {
+        gap: 2px;
+    }
+
+    .fz-table-header {
+        grid-template-columns: 1fr 60px 30px;
+    }
+
+    .fz-col-modified {
+        display: none;
+    }
+
+    .fz-entry {
+        grid-template-columns: 1fr 60px 30px;
+        padding: 10px 10px;
+        min-height: 44px;
+    }
+
+    .fz-entry .fz-modified {
+        display: none;
+    }
+
+    .fz-client-entry {
+        padding: 10px 12px;
+        min-height: 44px;
+    }
+
+    .fz-transfer-bar {
+        min-height: 40px;
+    }
+
+    .fz-transfer-bar .btn {
+        min-height: 36px;
+    }
+
+    /* --- Login --- */
+    .login-card {
+        padding: 28px 20px;
+        margin: 0 16px;
+        max-width: none;
+    }
+
+    .login-logo h1 {
+        font-size: 22px;
+    }
+
+    .logo-icon-large {
+        width: 64px;
+        height: 64px;
+    }
+
+    /* --- Settings --- */
+    .settings-grid {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .settings-card {
+        padding: 16px;
+    }
+
+    .info-value.truncate {
+        max-width: 120px;
+    }
+
+    /* --- Notification - above bottom bar --- */
+    .notification {
+        bottom: 64px;
+        right: 12px;
+        left: 12px;
+        max-width: none;
+    }
+
+    /* --- Dialog --- */
+    .dialog {
+        min-width: auto;
+        width: calc(100% - 32px);
+        max-width: 400px;
+        padding: 20px;
+    }
+
+    /* --- Terminal --- */
+    .terminal-output {
+        padding: 10px;
+        font-size: 12px;
+    }
+
+    .terminal-input-row {
+        padding: 10px 12px;
+    }
+
+    #terminal-input {
+        font-size: 14px;
+    }
+
+    /* --- Fullscreen overrides --- */
+    body.fullscreen .content {
+        padding-bottom: 0;
+        height: 100vh;
+    }
+
+    body.fullscreen .sidebar {
+        display: none !important;
+    }
+
+    .fs-toolbar {
+        top: auto;
+        bottom: 8px;
+        right: 8px;
+        left: 8px;
+        justify-content: center;
     }
 }
