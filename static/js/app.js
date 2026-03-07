@@ -45,9 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('login-btn').addEventListener('click', login);
 
-    // Terminal input
-    document.getElementById('terminal-input').addEventListener('keydown', handleTerminalKey);
-
     // Auto-focus password input
     document.getElementById('password-input').focus();
 });
@@ -156,7 +153,15 @@ function navigate(page) {
     });
 
     if (page === 'terminal') {
-        document.getElementById('terminal-input').focus();
+        if (termState.tabs.length === 0) {
+            createTerminalTab();
+        } else if (termState.activeTab && termState.terminals[termState.activeTab]) {
+            const active = termState.terminals[termState.activeTab];
+            setTimeout(() => {
+                active.fitAddon.fit();
+                active.term.focus();
+            }, 50);
+        }
     }
     if (page === 'files') {
         refreshFiles();
@@ -164,6 +169,12 @@ function navigate(page) {
     if (page === 'settings') {
         loadDeviceInfo();
         renderShortcutsList();
+    }
+
+    // Show mobile toolbar only on desktop page
+    const mobileToolbar = document.getElementById('mobile-toolbar');
+    if (mobileToolbar) {
+        mobileToolbar.style.display = page === 'desktop' ? '' : 'none';
     }
 }
 
@@ -189,10 +200,14 @@ function connectWebSocket() {
                 state.screenWidth = data.screen_width;
                 state.screenHeight = data.screen_height;
                 showNotification('Connected to remote desktop', 'success');
+                // Request list of existing terminal sessions
+                state.ws.send(JSON.stringify({ type: 'term_list' }));
             } else if (data.type === 'frame') {
                 renderFrame(data);
             } else if (data.type === 'error') {
                 showNotification(data.message, 'error');
+            } else if (data.type && data.type.startsWith('term_')) {
+                _handleTerminalWsMessage(data);
             }
         } catch (_) {}
     };
@@ -406,13 +421,9 @@ function setupCanvasEvents() {
     });
 
     let isDragging = false;
-    let lastMouseDownTime = 0;
-    let lastMouseDownPos = null;
-    let skipNextMouseUp = false;
 
     canvas.addEventListener('mousedown', (e) => {
         if (!state.controlling) {
-            // Enable panning when zoomed and not controlling
             if (state.zoom !== 0 && e.button === 0) {
                 state.isPanning = true;
                 state.panStart = { x: e.clientX, y: e.clientY };
@@ -424,26 +435,8 @@ function setupCanvasEvents() {
         e.preventDefault();
         const pos = canvasToNormalized(e);
         const btn = ['left', 'middle', 'right'][e.button] || 'left';
-        const now = Date.now();
-
-        // Detect double-click: two mousedowns within 400ms at same position
-        if (btn === 'left' && now - lastMouseDownTime < 400 && lastMouseDownPos) {
-            const dx = Math.abs(pos.x - lastMouseDownPos.x);
-            const dy = Math.abs(pos.y - lastMouseDownPos.y);
-            if (dx < 0.03 && dy < 0.03) {
-                sendControl({ type: 'mouse_dblclick', ...pos });
-                lastMouseDownTime = 0;
-                lastMouseDownPos = null;
-                isDragging = false;
-                skipNextMouseUp = true;
-                return;
-            }
-        }
-
         isDragging = true;
         sendControl({ type: 'mouse_down', ...pos, button: btn });
-        lastMouseDownTime = now;
-        lastMouseDownPos = pos;
     });
 
     // Panning move (when not controlling)
@@ -466,11 +459,6 @@ function setupCanvasEvents() {
 
     canvas.addEventListener('mouseup', (e) => {
         if (!state.controlling) return;
-        if (skipNextMouseUp) {
-            skipNextMouseUp = false;
-            isDragging = false;
-            return;
-        }
         isDragging = false;
         sendControl({
             type: 'mouse_up', ...canvasToNormalized(e),
@@ -478,15 +466,37 @@ function setupCanvasEvents() {
         });
     });
 
-    // Suppress browser click/dblclick - handled via mousedown detection
+    // Double-click: use browser's native dblclick event
+    canvas.addEventListener('dblclick', (e) => {
+        if (!state.controlling) return;
+        e.preventDefault();
+        // Server handles the full double-click with proper OS click counts
+        sendControl({ type: 'mouse_dblclick', ...canvasToNormalized(e) });
+    });
+
     canvas.addEventListener('click', (e) => { if (state.controlling) e.preventDefault(); });
-    canvas.addEventListener('dblclick', (e) => { if (state.controlling) e.preventDefault(); });
 
     canvas.addEventListener('wheel', (e) => {
-        // Ctrl+scroll = zoom
+        // Ctrl/Cmd+scroll = zoom centered on cursor
         if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
+            const containerRect = container.getBoundingClientRect();
+            const contentX = e.clientX - containerRect.left + container.scrollLeft;
+            const contentY = e.clientY - containerRect.top + container.scrollTop;
+            const oldScale = state.zoom === 0 ?
+                Math.min(container.clientWidth / canvas.width, container.clientHeight / canvas.height) :
+                state.zoom / 100;
+
             if (e.deltaY < 0) zoomIn(); else zoomOut();
+
+            const newScale = state.zoom === 0 ?
+                Math.min(container.clientWidth / canvas.width, container.clientHeight / canvas.height) :
+                state.zoom / 100;
+            if (state.zoom !== 0) {
+                const scaleChange = newScale / oldScale;
+                container.scrollLeft = contentX * scaleChange - (e.clientX - containerRect.left);
+                container.scrollTop = contentY * scaleChange - (e.clientY - containerRect.top);
+            }
             return;
         }
         if (!state.controlling) return;
@@ -508,6 +518,12 @@ function setupCanvasEvents() {
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('keyup', handleKeyUp);
 
+    // Release all modifiers when window loses focus or tab becomes hidden
+    window.addEventListener('blur', releaseAllModifiers);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) releaseAllModifiers();
+    });
+
     // === Touch Events (mobile/tablet) ===
     const touchState = {
         startTime: 0,
@@ -518,15 +534,27 @@ function setupCanvasEvents() {
         lastDist: 0,
         lastCenter: null,
         longPressTimer: null,
+        pinchStartZoom: 0,
+        pinchStartDist: 0,
     };
     let lastTapTime = 0;
     let tapClickTimer = null;
     let pendingTapPos = null;
 
+    function getCurrentScale() {
+        const canvas = document.getElementById('remote-canvas');
+        const ctr = document.getElementById('desktop-container');
+        if (!canvas.width || !canvas.height) return 1;
+        if (state.zoom === 0) {
+            return Math.min(ctr.clientWidth / canvas.width, ctr.clientHeight / canvas.height);
+        }
+        return state.zoom / 100;
+    }
+
     canvas.addEventListener('touchstart', (e) => {
         e.preventDefault();
 
-        if (e.touches.length === 1) {
+        if (e.touches.length === 1 && !touchState.pinching) {
             touchState.startTime = Date.now();
             touchState.startPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
             touchState.moved = false;
@@ -540,20 +568,30 @@ function setupCanvasEvents() {
                 touchState.longPressTimer = setTimeout(() => {
                     if (!touchState.moved) {
                         sendControl({ type: 'mouse_click', ...pos, button: 'right' });
-                        touchState.startPos = null; // Cancel tap on touchend
+                        touchState.startPos = null;
                     }
                 }, 600);
             } else if (state.zoom !== 0) {
-                // Pan when not controlling
+                // Pan when not controlling and zoomed
                 state.isPanning = true;
                 state.panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
                 state.scrollStart = { x: container.scrollLeft, y: container.scrollTop };
             }
         } else if (e.touches.length === 2) {
             clearTimeout(touchState.longPressTimer);
+
+            // If was dragging, release mouse first
+            if (touchState.dragging && state.controlling) {
+                const pos = touchToNormalized(e.changedTouches[0] || e.touches[0]);
+                sendControl({ type: 'mouse_up', ...pos, button: 'left' });
+            }
+
             touchState.pinching = true;
             touchState.dragging = false;
+            state.isPanning = false;
             touchState.lastDist = getTouchDistance(e.touches);
+            touchState.pinchStartDist = touchState.lastDist;
+            touchState.pinchStartZoom = getCurrentScale() * 100;
             touchState.lastCenter = getTouchCenter(e.touches);
         }
     }, { passive: false });
@@ -589,12 +627,30 @@ function setupCanvasEvents() {
             const dist = getTouchDistance(e.touches);
             const center = getTouchCenter(e.touches);
 
-            if (touchState.lastDist > 0) {
-                const ratio = dist / touchState.lastDist;
-                if (ratio > 1.08) { zoomIn(); touchState.lastDist = dist; }
-                else if (ratio < 0.92) { zoomOut(); touchState.lastDist = dist; }
+            // --- Smooth pinch zoom centered on pinch point ---
+            if (touchState.pinchStartDist > 0) {
+                const ratio = dist / touchState.pinchStartDist;
+                const oldScale = getCurrentScale();
+                const newZoom = Math.max(10, Math.min(500, Math.round(touchState.pinchStartZoom * ratio)));
+
+                if (newZoom !== state.zoom) {
+                    // Calculate pinch center in content coordinates (before zoom)
+                    const containerRect = container.getBoundingClientRect();
+                    const contentX = center.x - containerRect.left + container.scrollLeft;
+                    const contentY = center.y - containerRect.top + container.scrollTop;
+
+                    state.zoom = newZoom;
+                    const newScale = state.zoom / 100;
+                    applyZoom();
+
+                    // Adjust scroll to keep pinch center stationary
+                    const scaleChange = newScale / oldScale;
+                    container.scrollLeft = contentX * scaleChange - (center.x - containerRect.left);
+                    container.scrollTop = contentY * scaleChange - (center.y - containerRect.top);
+                }
             }
 
+            // --- Simultaneous two-finger pan ---
             if (touchState.lastCenter) {
                 container.scrollLeft -= (center.x - touchState.lastCenter.x);
                 container.scrollTop -= (center.y - touchState.lastCenter.y);
@@ -619,13 +675,11 @@ function setupCanvasEvents() {
                     const pos = touchToNormalized(touch);
                     const now = Date.now();
                     if (tapClickTimer && now - lastTapTime < 400) {
-                        // Double-tap: cancel pending single click, send dblclick
                         clearTimeout(tapClickTimer);
                         tapClickTimer = null;
                         sendControl({ type: 'mouse_dblclick', ...pos });
                         lastTapTime = 0;
                     } else {
-                        // Single tap: delay to check for double-tap
                         lastTapTime = now;
                         pendingTapPos = pos;
                         tapClickTimer = setTimeout(() => {
@@ -648,6 +702,18 @@ function setupCanvasEvents() {
             touchState.pinching = false;
             touchState.lastDist = 0;
             touchState.lastCenter = null;
+
+            // Snap to fit if zoomed very close to fit level
+            const canvas = document.getElementById('remote-canvas');
+            if (canvas.width && canvas.height) {
+                const fitScale = Math.min(container.clientWidth / canvas.width, container.clientHeight / canvas.height);
+                const fitPct = Math.round(fitScale * 100);
+                if (state.zoom > 0 && Math.abs(state.zoom - fitPct) < 5) {
+                    state.zoom = 0;
+                    applyZoom();
+                    container.scrollTo(0, 0);
+                }
+            }
         }
     }, { passive: false });
 }
@@ -664,30 +730,53 @@ function handleKeyDown(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    // Don't send bare modifier/special keys alone
-    if (['Control', 'Alt', 'Shift', 'Meta', 'Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'].includes(e.key)) return;
+    // Don't send bare modifier/special keys alone (but DO send key_down for modifiers)
+    const MODIFIER_KEYS = ['Control', 'Alt', 'Shift', 'Meta'];
+    const IGNORE_KEYS = ['Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'];
 
-    // Skip auto-repeated keys
-    if (e.repeat) return;
+    if (IGNORE_KEYS.includes(e.key)) return;
 
-    // Use the event's own modifier flags - always accurate per-event
-    const modifiers = [];
-    if (e.ctrlKey) modifiers.push('ctrl');
-    if (e.altKey) modifiers.push('alt');
-    if (e.shiftKey) modifiers.push('shift');
-    if (e.metaKey) modifiers.push('command');
+    // Send modifier key_down/key_up separately
+    if (MODIFIER_KEYS.includes(e.key)) {
+        if (!e.repeat) {
+            const modKey = { 'Control': 'ctrl', 'Alt': 'alt', 'Shift': 'shift', 'Meta': 'command' }[e.key];
+            sendControl({ type: 'key_down', key: modKey });
+        }
+        return;
+    }
 
     const key = KEY_MAP[e.key] || e.key.toLowerCase();
 
-    if (modifiers.length > 0) {
-        sendControl({ type: 'key_combo', keys: [...modifiers, key] });
-    } else {
-        sendControl({ type: 'key_press', key });
-    }
+    // For repeated keys (hold), send key_down again (OS handles repeat)
+    sendControl({ type: 'key_down', key });
 }
 
 function handleKeyUp(e) {
-    // no-op
+    if (state.currentPage !== 'desktop' || !state.controlling) return;
+
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const IGNORE_KEYS = ['Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'];
+    if (IGNORE_KEYS.includes(e.key)) return;
+
+    const MODIFIER_MAP = { 'Control': 'ctrl', 'Alt': 'alt', 'Shift': 'shift', 'Meta': 'command' };
+    if (MODIFIER_MAP[e.key]) {
+        sendControl({ type: 'key_up', key: MODIFIER_MAP[e.key] });
+        return;
+    }
+
+    const key = KEY_MAP[e.key] || e.key.toLowerCase();
+    sendControl({ type: 'key_up', key });
+}
+
+function releaseAllModifiers() {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'release_modifiers' }));
+    }
 }
 
 // === Control Toggle ===
@@ -697,15 +786,17 @@ function toggleControl() {
     const canvas = document.getElementById('remote-canvas');
 
     const fsLabel = document.getElementById('fs-control-label');
+    const mobileBtn = document.getElementById('mobile-control-toggle');
     if (state.controlling) {
         btn.classList.add('active');
         btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 2L2 7l10 5 10-5-10-5z"/>
             <path d="M2 17l10 5 10-5"/>
             <path d="M2 12l10 5 10-5"/>
-        </svg> Control ON`;
+        </svg> <span class="btn-label">Control</span>`;
         canvas.classList.add('controlling');
         if (fsLabel) fsLabel.textContent = 'Control ON';
+        if (mobileBtn) mobileBtn.classList.add('active');
         showNotification('Remote control enabled', 'info');
     } else {
         btn.classList.remove('active');
@@ -713,9 +804,11 @@ function toggleControl() {
             <path d="M12 2L2 7l10 5 10-5-10-5z"/>
             <path d="M2 17l10 5 10-5"/>
             <path d="M2 12l10 5 10-5"/>
-        </svg> Enable Control`;
+        </svg> <span class="btn-label">Control</span>`;
         canvas.classList.remove('controlling');
+        releaseAllModifiers();
         if (fsLabel) fsLabel.textContent = 'Control OFF';
+        if (mobileBtn) mobileBtn.classList.remove('active');
     }
 }
 
@@ -758,20 +851,18 @@ function shortcutLabel(keys) {
 
 function renderToolbarShortcuts() {
     const shortcuts = loadShortcuts();
+    const btnHtml = shortcuts.map(s =>
+        `<button class="btn btn-sm vk-combo" onclick="sendVkCombo(${JSON.stringify(s.keys).replace(/"/g, '&quot;')})">${escapeHtml(s.label)}</button>`
+    ).join('');
     // Main toolbar
     const container = document.getElementById('toolbar-shortcuts');
-    if (container) {
-        container.innerHTML = shortcuts.map(s =>
-            `<button class="btn btn-sm vk-combo" onclick="sendVkCombo(${JSON.stringify(s.keys).replace(/"/g, '&quot;')})">${escapeHtml(s.label)}</button>`
-        ).join('');
-    }
+    if (container) container.innerHTML = btnHtml;
     // Fullscreen toolbar
     const fsContainer = document.getElementById('fs-shortcuts');
-    if (fsContainer) {
-        fsContainer.innerHTML = shortcuts.map(s =>
-            `<button class="btn btn-sm vk-combo" onclick="sendVkCombo(${JSON.stringify(s.keys).replace(/"/g, '&quot;')})">${escapeHtml(s.label)}</button>`
-        ).join('');
-    }
+    if (fsContainer) fsContainer.innerHTML = btnHtml;
+    // Mobile toolbar
+    const mobileContainer = document.getElementById('mobile-shortcuts');
+    if (mobileContainer) mobileContainer.innerHTML = btnHtml;
 }
 
 function renderShortcutsList() {
@@ -843,9 +934,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // === Mobile On-Screen Keyboard ===
 let mobileKbActive = false;
+let _kbToggling = false;
 
 function toggleMobileKeyboard() {
     const input = document.getElementById('mobile-kb-input');
+    _kbToggling = true;
     mobileKbActive = !mobileKbActive;
 
     if (mobileKbActive) {
@@ -854,11 +947,17 @@ function toggleMobileKeyboard() {
         input.blur();
     }
 
-    // Update both toolbar and fullscreen KB buttons
+    updateKbButtons();
+    setTimeout(() => { _kbToggling = false; }, 150);
+}
+
+function updateKbButtons() {
     const btn = document.getElementById('mobile-kb-btn');
     const fsBtn = document.getElementById('fs-kb-btn');
+    const mobileBtn2 = document.getElementById('mobile-kb-btn2');
     if (btn) btn.classList.toggle('active', mobileKbActive);
     if (fsBtn) fsBtn.classList.toggle('active', mobileKbActive);
+    if (mobileBtn2) mobileBtn2.classList.toggle('active', mobileKbActive);
 }
 
 (function initMobileKeyboard() {
@@ -888,13 +987,11 @@ function toggleMobileKeyboard() {
         // Let normal characters go through the 'input' event
     });
 
-    // Detect when keyboard is dismissed
+    // Detect when keyboard is dismissed externally (not via button)
     input.addEventListener('blur', () => {
+        if (_kbToggling) return;
         mobileKbActive = false;
-        const btn = document.getElementById('mobile-kb-btn');
-        const fsBtn = document.getElementById('fs-kb-btn');
-        if (btn) btn.classList.remove('active');
-        if (fsBtn) fsBtn.classList.remove('active');
+        updateKbButtons();
     });
 })();
 
@@ -922,107 +1019,248 @@ function updateQualityFromToolbar() {
     sendControl({ type: 'stream_settings', quality });
 }
 
-// === Terminal ===
-async function executeCommand(cmd) {
-    const output = document.getElementById('terminal-output');
+// === Terminal (xterm.js + PTY) ===
+const termState = {
+    tabs: [],        // ordered list of session IDs
+    activeTab: null, // current session ID
+    terminals: {},   // session_id -> { term, fitAddon, element }
+    tabCounter: 0,
+};
 
-    // Show command
-    const cmdDiv = document.createElement('div');
-    cmdDiv.className = 'cmd-line';
-    cmdDiv.textContent = '$ ' + cmd;
-    output.appendChild(cmdDiv);
+function initTerminal() {
+    // Nothing to init until user navigates to terminal page
+}
 
-    try {
-        const res = await fetch('/api/command', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + state.token,
-            },
-            body: JSON.stringify({ command: cmd, cwd: state.currentDir }),
-        });
+function createTerminalTab() {
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        showNotification('Not connected', 'error');
+        return;
+    }
+    state.ws.send(JSON.stringify({ type: 'term_create' }));
+}
 
-        const data = await res.json();
+function _setupTerminalInstance(sessionId, bufferData) {
+    const container = document.getElementById('term-container');
+    if (!container) return;
 
-        if (data.stdout) {
-            const stdoutDiv = document.createElement('div');
-            stdoutDiv.className = 'stdout';
-            stdoutDiv.textContent = data.stdout;
-            output.appendChild(stdoutDiv);
+    // Create xterm.js instance
+    const term = new Terminal({
+        fontSize: 12,
+        fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
+        theme: {
+            background: '#050810',
+            foreground: '#f1f5f9',
+            cursor: '#3b82f6',
+            selectionBackground: 'rgba(59, 130, 246, 0.3)',
+            black: '#1a1b26',
+            red: '#f7768e',
+            green: '#9ece6a',
+            yellow: '#e0af68',
+            blue: '#7aa2f7',
+            magenta: '#bb9af7',
+            cyan: '#7dcfff',
+            white: '#c0caf5',
+            brightBlack: '#414868',
+            brightRed: '#f7768e',
+            brightGreen: '#9ece6a',
+            brightYellow: '#e0af68',
+            brightBlue: '#7aa2f7',
+            brightMagenta: '#bb9af7',
+            brightCyan: '#7dcfff',
+            brightWhite: '#c0caf5',
+        },
+        scrollback: 5000,
+        cursorBlink: true,
+        convertEol: false,
+    });
+
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+
+    // Create DOM element
+    const el = document.createElement('div');
+    el.className = 'term-instance';
+    el.dataset.sessionId = sessionId;
+    container.appendChild(el);
+
+    term.open(el);
+
+    // Write buffer replay
+    if (bufferData) {
+        const bytes = Uint8Array.from(atob(bufferData), c => c.charCodeAt(0));
+        term.write(bytes);
+    }
+
+    // Fit after a short delay to allow layout
+    setTimeout(() => {
+        fitAddon.fit();
+        // Send initial size to server
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+                type: 'term_resize',
+                session_id: sessionId,
+                rows: term.rows,
+                cols: term.cols,
+            }));
         }
+    }, 50);
 
-        if (data.stderr) {
-            const stderrDiv = document.createElement('div');
-            stderrDiv.className = 'stderr';
-            stderrDiv.textContent = data.stderr;
-            output.appendChild(stderrDiv);
+    // Handle user input
+    term.onData((data) => {
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+                type: 'term_input',
+                session_id: sessionId,
+                data: btoa(data),
+            }));
         }
+    });
 
-        // Check for cd command to update current directory
-        if (cmd.trim().startsWith('cd ')) {
-            const newDir = cmd.trim().slice(3).trim();
-            if (data.returncode === 0) {
-                // Resolve the new directory
-                const resolveRes = await fetch('/api/command', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + state.token,
-                    },
-                    body: JSON.stringify({
-                        command: `cd ${newDir} && pwd`,
-                        cwd: state.currentDir,
-                    }),
-                });
-                const resolveData = await resolveRes.json();
-                if (resolveData.stdout) {
-                    state.currentDir = resolveData.stdout.trim();
+    // Store
+    termState.terminals[sessionId] = { term, fitAddon, element: el };
+    termState.tabCounter++;
+    termState.tabs.push(sessionId);
+
+    // Render tabs and switch
+    _renderTermTabs();
+    switchTerminalTab(sessionId);
+}
+
+function switchTerminalTab(sessionId) {
+    termState.activeTab = sessionId;
+
+    // Show/hide terminal instances
+    for (const [sid, info] of Object.entries(termState.terminals)) {
+        info.element.style.display = sid === sessionId ? '' : 'none';
+    }
+
+    // Update tab active state
+    _renderTermTabs();
+
+    // Fit the active terminal
+    const active = termState.terminals[sessionId];
+    if (active) {
+        setTimeout(() => {
+            active.fitAddon.fit();
+            active.term.focus();
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                state.ws.send(JSON.stringify({
+                    type: 'term_resize',
+                    session_id: sessionId,
+                    rows: active.term.rows,
+                    cols: active.term.cols,
+                }));
+            }
+        }, 50);
+    }
+}
+
+function closeTerminalTab(sessionId) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+            type: 'term_close',
+            session_id: sessionId,
+        }));
+    }
+    _removeTerminalTab(sessionId);
+}
+
+function _removeTerminalTab(sessionId) {
+    const info = termState.terminals[sessionId];
+    if (info) {
+        info.term.dispose();
+        info.element.remove();
+        delete termState.terminals[sessionId];
+    }
+
+    const idx = termState.tabs.indexOf(sessionId);
+    if (idx !== -1) termState.tabs.splice(idx, 1);
+
+    // Switch to another tab or clear
+    if (termState.activeTab === sessionId) {
+        if (termState.tabs.length > 0) {
+            switchTerminalTab(termState.tabs[Math.min(idx, termState.tabs.length - 1)]);
+        } else {
+            termState.activeTab = null;
+            _renderTermTabs();
+        }
+    } else {
+        _renderTermTabs();
+    }
+}
+
+function _renderTermTabs() {
+    const tabsEl = document.getElementById('term-tabs');
+    if (!tabsEl) return;
+
+    tabsEl.innerHTML = termState.tabs.map((sid, i) => {
+        const isActive = sid === termState.activeTab;
+        return `<div class="term-tab ${isActive ? 'active' : ''}" onclick="switchTerminalTab('${sid}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.6">
+                <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+            <span>Terminal ${i + 1}</span>
+            <button class="term-tab-close" onclick="event.stopPropagation();closeTerminalTab('${sid}')" title="Close">&times;</button>
+        </div>`;
+    }).join('');
+}
+
+function _handleTerminalWsMessage(data) {
+    switch (data.type) {
+        case 'term_created': {
+            _setupTerminalInstance(data.session_id, data.buffer || '');
+            break;
+        }
+        case 'term_output': {
+            const info = termState.terminals[data.session_id];
+            if (info) {
+                const bytes = Uint8Array.from(atob(data.data), c => c.charCodeAt(0));
+                info.term.write(bytes);
+            }
+            break;
+        }
+        case 'term_closed': {
+            _removeTerminalTab(data.session_id);
+            break;
+        }
+        case 'term_list': {
+            // Reconnect: subscribe to existing sessions
+            if (data.sessions && data.sessions.length > 0) {
+                for (const s of data.sessions) {
+                    if (s.alive && !termState.terminals[s.session_id]) {
+                        state.ws.send(JSON.stringify({
+                            type: 'term_subscribe',
+                            session_id: s.session_id,
+                        }));
+                    }
                 }
             }
+            break;
         }
-    } catch (err) {
-        const errDiv = document.createElement('div');
-        errDiv.className = 'stderr';
-        errDiv.textContent = 'Error: ' + err.message;
-        output.appendChild(errDiv);
-    }
-
-    output.scrollTop = output.scrollHeight;
-}
-
-function handleTerminalKey(e) {
-    const input = document.getElementById('terminal-input');
-
-    if (e.key === 'Enter') {
-        const cmd = input.value.trim();
-        if (!cmd) return;
-
-        state.commandHistory.push(cmd);
-        state.historyIndex = state.commandHistory.length;
-        input.value = '';
-
-        executeCommand(cmd);
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (state.historyIndex > 0) {
-            state.historyIndex--;
-            input.value = state.commandHistory[state.historyIndex];
-        }
-    } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (state.historyIndex < state.commandHistory.length - 1) {
-            state.historyIndex++;
-            input.value = state.commandHistory[state.historyIndex];
-        } else {
-            state.historyIndex = state.commandHistory.length;
-            input.value = '';
+        case 'term_subscribed': {
+            if (!termState.terminals[data.session_id]) {
+                _setupTerminalInstance(data.session_id, data.buffer || '');
+            }
+            break;
         }
     }
 }
 
-function clearTerminal() {
-    document.getElementById('terminal-output').innerHTML = '';
-}
+// Resize terminals on window resize
+window.addEventListener('resize', () => {
+    if (termState.activeTab && termState.terminals[termState.activeTab]) {
+        const active = termState.terminals[termState.activeTab];
+        active.fitAddon.fit();
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+                type: 'term_resize',
+                session_id: termState.activeTab,
+                rows: active.term.rows,
+                cols: active.term.cols,
+            }));
+        }
+    }
+});
 
 // === File Manager (FileZilla-style) ===
 

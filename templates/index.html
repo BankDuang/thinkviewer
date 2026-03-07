@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>ThinkViewer</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0/lib/addon-fit.min.js"></script>
 </head>
 <body>
     <div id="app">
@@ -126,7 +129,12 @@
                                     <path d="M2 17l10 5 10-5"/>
                                     <path d="M2 12l10 5 10-5"/>
                                 </svg>
-                                Enable Control
+                                <span class="btn-label">Control</span>
+                            </button>
+                            <button class="btn btn-sm" id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                                </svg>
                             </button>
                             <div class="control-divider"></div>
                             <span id="toolbar-shortcuts"></span>
@@ -167,12 +175,6 @@
                                 </svg>
                             </button>
                             <button class="btn btn-sm" onclick="zoomFit()" title="Fit to window">Fit</button>
-                            <div class="control-divider"></div>
-                            <button class="btn btn-sm" id="fullscreen-btn" onclick="toggleFullscreen()" title="Fullscreen">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-                                </svg>
-                            </button>
                         </div>
                     </div>
                     <!-- Hidden input to trigger mobile on-screen keyboard -->
@@ -200,23 +202,38 @@
                         <button class="btn btn-sm" onclick="zoomFit()">Fit</button>
                         <button class="btn btn-sm btn-outline-danger" onclick="toggleFullscreen()">Exit</button>
                     </div>
+                    <!-- Floating toolbar for mobile (above tab bar) -->
+                    <div id="mobile-toolbar" class="mobile-toolbar">
+                        <button class="btn btn-sm btn-control" id="mobile-control-toggle" onclick="toggleControl()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                            </svg>
+                        </button>
+                        <button class="btn btn-sm" onclick="toggleFullscreen()" title="Fullscreen">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                            </svg>
+                        </button>
+                        <button class="btn btn-sm" id="mobile-kb-btn2" onclick="toggleMobileKeyboard()">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                                <line x1="6" y1="8" x2="6.01" y2="8"/><line x1="10" y1="8" x2="10.01" y2="8"/><line x1="14" y1="8" x2="14.01" y2="8"/><line x1="18" y1="8" x2="18.01" y2="8"/>
+                                <line x1="8" y1="16" x2="16" y2="16"/>
+                            </svg>
+                        </button>
+                        <span id="mobile-shortcuts"></span>
+                    </div>
                 </div>
 
                 <!-- Terminal Page -->
                 <div id="terminal-page" class="page hidden">
-                    <div class="page-header">
-                        <h2>Terminal</h2>
-                        <div class="terminal-controls">
-                            <button class="btn btn-sm" onclick="clearTerminal()">Clear</button>
-                        </div>
+                    <div class="term-tab-bar" id="term-tab-bar">
+                        <div class="term-tabs" id="term-tabs"></div>
+                        <button class="btn btn-xs term-new-btn" onclick="createTerminalTab()" title="New terminal">+</button>
                     </div>
-                    <div class="terminal-container">
-                        <div id="terminal-output" class="terminal-output"></div>
-                        <div class="terminal-input-row">
-                            <span class="terminal-prompt">$</span>
-                            <input type="text" id="terminal-input" placeholder="Enter command..." autocomplete="off">
-                        </div>
-                    </div>
+                    <div class="term-container" id="term-container"></div>
                 </div>
 
                 <!-- Files Page (FileZilla-style split pane) -->
@@ -450,5 +467,11 @@
     </div>
 
     <script src="/static/js/app.js"></script>
+    <script>
+        // Initialize terminal module after app.js loads
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof initTerminal === 'function') initTerminal();
+        });
+    </script>
 </body>
 </html>

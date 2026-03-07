@@ -4,6 +4,7 @@ jinja2==3.1.4
 python-multipart==0.0.20
 mss==9.0.2
 pyautogui==0.9.54
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 Pillow==11.1.0
 aiofiles==24.1.0
 websockets==14.1

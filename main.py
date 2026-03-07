@@ -16,6 +16,14 @@ import io
 import time
 import platform
 import shutil
+import subprocess
+import pty
+import select
+import struct
+import fcntl
+import termios
+import threading
+import signal
 from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -36,6 +44,41 @@ import mss
 from PIL import Image, ImageDraw
 import pyautogui
 
+# macOS: import Quartz for proper double-click with clickState
+_USE_QUARTZ = False
+try:
+    if platform.system() == "Darwin":
+        import Quartz
+        _USE_QUARTZ = True
+except ImportError:
+    pass
+
+
+def _perform_double_click(x, y):
+    """Perform a real double-click with proper OS click counts."""
+    if _USE_QUARTZ:
+        point = Quartz.CGPointMake(float(x), float(y))
+        # Click 1: clickState=1
+        e = Quartz.CGEventCreateMouseEvent(
+            None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventSetIntegerValueField(e, Quartz.kCGMouseEventClickState, 1)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+        e = Quartz.CGEventCreateMouseEvent(
+            None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventSetIntegerValueField(e, Quartz.kCGMouseEventClickState, 1)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+        # Click 2: clickState=2 (tells macOS it's a double-click)
+        e = Quartz.CGEventCreateMouseEvent(
+            None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventSetIntegerValueField(e, Quartz.kCGMouseEventClickState, 2)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+        e = Quartz.CGEventCreateMouseEvent(
+            None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft)
+        Quartz.CGEventSetIntegerValueField(e, Quartz.kCGMouseEventClickState, 2)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+    else:
+        pyautogui.doubleClick(x, y, _pause=False)
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -47,6 +90,233 @@ ENV_PASSWORD = os.getenv("THINKVIEWER_PASSWORD")
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
+
+
+# ============================================================
+# Wake / Keep-Awake (macOS: caffeinate, Linux: xdotool/dbus)
+# ============================================================
+_caffeinate_proc = None
+
+def wake_screen():
+    """Wake the display from sleep."""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            subprocess.Popen(["caffeinate", "-u", "-t", "5"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif system == "Linux":
+            subprocess.Popen(["xdotool", "key", "--clearmodifiers", "shift"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif system == "Windows":
+            import ctypes
+            ES_DISPLAY_REQUIRED = 0x00000002
+            ES_SYSTEM_REQUIRED = 0x00000001
+            ctypes.windll.kernel32.SetThreadExecutionState(
+                ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
+    except Exception:
+        pass
+
+def keep_awake_start():
+    """Prevent system/display sleep while clients are connected."""
+    global _caffeinate_proc
+    if _caffeinate_proc and _caffeinate_proc.poll() is None:
+        return  # already running
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            _caffeinate_proc = subprocess.Popen(
+                ["caffeinate", "-dis"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif system == "Linux":
+            _caffeinate_proc = subprocess.Popen(
+                ["systemd-inhibit", "--what=idle:sleep", "--who=ThinkViewer",
+                 "--why=Client connected", "sleep", "infinity"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+def keep_awake_stop():
+    """Allow system to sleep again when no clients remain."""
+    global _caffeinate_proc
+    if _caffeinate_proc:
+        try:
+            _caffeinate_proc.terminate()
+        except Exception:
+            pass
+        _caffeinate_proc = None
+
+
+# ============================================================
+# PTY Terminal Sessions
+# ============================================================
+class TerminalSession:
+    def __init__(self, session_id: str, loop: asyncio.AbstractEventLoop):
+        self.session_id = session_id
+        self.loop = loop
+        self.subscribers: set = set()  # WebSocket clients
+        self.alive = True
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._scrollback: bytearray = bytearray()
+        self._scrollback_limit = 64 * 1024  # 64KB ring buffer
+
+        # Fork PTY
+        shell = os.environ.get("SHELL", "/bin/bash")
+        env = os.environ.copy()
+        env["TERM"] = "xterm-256color"
+        env["COLORTERM"] = "truecolor"
+        master_fd, slave_fd = pty.openpty()
+        child_pid = os.fork()
+        if child_pid == 0:
+            # Child process
+            os.close(master_fd)
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            os.dup2(slave_fd, 0)
+            os.dup2(slave_fd, 1)
+            os.dup2(slave_fd, 2)
+            if slave_fd > 2:
+                os.close(slave_fd)
+            os.execvpe(shell, [shell, "-l"], env)
+        else:
+            # Parent process
+            os.close(slave_fd)
+            self.fd = master_fd
+            self.pid = child_pid
+            # Set initial size
+            self.resize(24, 80)
+            # Start reader thread
+            self._reader_thread = threading.Thread(
+                target=self._read_loop, daemon=True)
+            self._reader_thread.start()
+
+    def _read_loop(self):
+        """Read PTY output in a thread and queue it for async broadcast."""
+        while self.alive:
+            try:
+                ready, _, _ = select.select([self.fd], [], [], 0.1)
+                if ready:
+                    data = os.read(self.fd, 65536)
+                    if not data:
+                        break
+                    # Store in scrollback
+                    self._scrollback.extend(data)
+                    if len(self._scrollback) > self._scrollback_limit:
+                        excess = len(self._scrollback) - self._scrollback_limit
+                        del self._scrollback[:excess]
+                    # Queue for broadcast
+                    self.loop.call_soon_threadsafe(self._queue.put_nowait, data)
+            except OSError:
+                break
+        self.alive = False
+        self.loop.call_soon_threadsafe(self._queue.put_nowait, None)
+
+    def write(self, data: bytes):
+        if self.alive:
+            try:
+                os.write(self.fd, data)
+            except OSError:
+                self.alive = False
+
+    def resize(self, rows: int, cols: int):
+        if self.alive:
+            try:
+                winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                fcntl.ioctl(self.fd, termios.TIOCSWINSZ, winsize)
+            except OSError:
+                pass
+
+    def get_replay_buffer(self) -> bytes:
+        """Return terminal reset + scrollback for reconnecting clients."""
+        if not self._scrollback:
+            return b""
+        # \033c = RIS (Reset to Initial State) clears the terminal fully
+        # before replaying recent output, preventing garbled rendering
+        return b"\033c" + bytes(self._scrollback)
+
+    def close(self):
+        self.alive = False
+        try:
+            os.kill(self.pid, signal.SIGTERM)
+        except (OSError, ProcessLookupError):
+            pass
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        try:
+            os.waitpid(self.pid, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            pass
+
+
+class TerminalManager:
+    def __init__(self):
+        self.sessions: dict[str, TerminalSession] = {}
+        self._broadcast_tasks: dict[str, asyncio.Task] = {}
+        self.loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        self.loop = loop
+
+    def create(self, session_id: str | None = None) -> TerminalSession:
+        if session_id is None:
+            session_id = str(uuid.uuid4())[:8]
+        session = TerminalSession(session_id, self.loop)
+        self.sessions[session_id] = session
+        # Start broadcast task
+        task = asyncio.create_task(self._broadcast_loop(session))
+        self._broadcast_tasks[session_id] = task
+        return session
+
+    async def _broadcast_loop(self, session: TerminalSession):
+        """Read from session queue and broadcast to subscribers."""
+        while True:
+            data = await session._queue.get()
+            if data is None:
+                # Session ended
+                break
+            encoded = base64.b64encode(data).decode()
+            msg = json.dumps({
+                "type": "term_output",
+                "session_id": session.session_id,
+                "data": encoded,
+            })
+            dead = set()
+            for ws in list(session.subscribers):
+                try:
+                    await ws.send_text(msg)
+                except Exception:
+                    dead.add(ws)
+            session.subscribers -= dead
+
+    def get(self, session_id: str) -> TerminalSession | None:
+        return self.sessions.get(session_id)
+
+    def close(self, session_id: str):
+        session = self.sessions.pop(session_id, None)
+        if session:
+            session.close()
+        task = self._broadcast_tasks.pop(session_id, None)
+        if task:
+            task.cancel()
+
+    def list_sessions(self) -> list[dict]:
+        return [
+            {"session_id": sid, "alive": s.alive}
+            for sid, s in self.sessions.items()
+        ]
+
+    def close_all(self):
+        for sid in list(self.sessions.keys()):
+            self.close(sid)
+
+    def unsubscribe_all(self, ws):
+        """Remove a WebSocket from all session subscribers."""
+        for session in self.sessions.values():
+            session.subscribers.discard(ws)
+
+
+term_manager = TerminalManager()
 
 
 # ============================================================
@@ -255,9 +525,9 @@ class ScreenStreamer:
                         except Exception as e:
                             print(f"Capture error: {e}")
 
-                    # Auto-release stuck modifier keys after 2s of no key activity
-                    if self.modifiers_dirty and time.time() - self.last_key_time > 2.0:
-                        for key in ("ctrl", "alt", "shift", "command"):
+                    # Auto-release stuck modifier keys after 1s of no key activity
+                    if self.modifiers_dirty and time.time() - self.last_key_time > 1.0:
+                        for key in ("ctrl", "alt", "shift", "command", "option"):
                             try:
                                 pyautogui.keyUp(key, _pause=False)
                             except Exception:
@@ -299,8 +569,7 @@ def handle_input(data):
 
         elif event_type == "mouse_dblclick":
             x, y = int(data["x"] * sw), int(data["y"] * sh)
-            # Only do one click - the first click already happened via mouse_down/mouse_up
-            pyautogui.click(x, y, _pause=False)
+            _perform_double_click(x, y)
 
         elif event_type == "mouse_down":
             x, y = int(data["x"] * sw), int(data["y"] * sh)
@@ -313,6 +582,20 @@ def handle_input(data):
         elif event_type == "mouse_scroll":
             x, y = int(data["x"] * sw), int(data["y"] * sh)
             pyautogui.scroll(data.get("delta", 0), x=x, y=y, _pause=False)
+
+        elif event_type == "key_down":
+            key = data.get("key", "")
+            if key:
+                pyautogui.keyDown(key, _pause=False)
+                streamer.last_key_time = time.time()
+                if key in ("ctrl", "alt", "shift", "command"):
+                    streamer.modifiers_dirty = True
+
+        elif event_type == "key_up":
+            key = data.get("key", "")
+            if key:
+                pyautogui.keyUp(key, _pause=False)
+                streamer.last_key_time = time.time()
 
         elif event_type == "key_press":
             key = data.get("key", "")
@@ -337,6 +620,14 @@ def handle_input(data):
                 streamer.last_key_time = time.time()
                 streamer.modifiers_dirty = True
 
+        elif event_type == "release_modifiers":
+            for key in ("ctrl", "alt", "shift", "command", "option"):
+                try:
+                    pyautogui.keyUp(key, _pause=False)
+                except Exception:
+                    pass
+            streamer.modifiers_dirty = False
+
         elif event_type == "type_text":
             text = data.get("text", "")
             if text:
@@ -353,6 +644,7 @@ def handle_input(data):
 async def lifespan(app: FastAPI):
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     init_db()
+    term_manager.set_loop(asyncio.get_event_loop())
     task = asyncio.create_task(streamer.start())
     yield
     streamer.running = False
@@ -361,6 +653,7 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    term_manager.close_all()
 
 
 app = FastAPI(title="ThinkViewer", lifespan=lifespan)
@@ -437,6 +730,10 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
         return
 
+    # Wake screen and prevent sleep
+    wake_screen()
+    keep_awake_start()
+
     streamer.clients.add(websocket)
     await websocket.send_json({
         "type": "auth_ok",
@@ -448,12 +745,58 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             raw = await websocket.receive_text()
             data = json.loads(raw)
-            if data.get("type") == "stream_settings":
+            msg_type = data.get("type", "")
+
+            if msg_type == "stream_settings":
                 streamer.update_settings(
                     quality=data.get("quality"),
                     fps=data.get("fps"),
                     scale=data.get("scale"),
                 )
+            elif msg_type == "term_create":
+                session = term_manager.create()
+                session.subscribers.add(websocket)
+                await websocket.send_json({
+                    "type": "term_created",
+                    "session_id": session.session_id,
+                    "buffer": "",
+                })
+            elif msg_type == "term_input":
+                sid = data.get("session_id", "")
+                session = term_manager.get(sid)
+                if session and session.alive:
+                    raw_data = base64.b64decode(data.get("data", ""))
+                    session.write(raw_data)
+            elif msg_type == "term_resize":
+                sid = data.get("session_id", "")
+                session = term_manager.get(sid)
+                if session:
+                    session.resize(
+                        data.get("rows", 24), data.get("cols", 80))
+            elif msg_type == "term_close":
+                sid = data.get("session_id", "")
+                term_manager.close(sid)
+                await websocket.send_json({
+                    "type": "term_closed",
+                    "session_id": sid,
+                })
+            elif msg_type == "term_list":
+                await websocket.send_json({
+                    "type": "term_list",
+                    "sessions": term_manager.list_sessions(),
+                })
+            elif msg_type == "term_subscribe":
+                sid = data.get("session_id", "")
+                session = term_manager.get(sid)
+                if session:
+                    session.subscribers.add(websocket)
+                    # Send reset + recent scrollback so client sees history
+                    replay = session.get_replay_buffer()
+                    await websocket.send_json({
+                        "type": "term_subscribed",
+                        "session_id": sid,
+                        "buffer": base64.b64encode(replay).decode() if replay else "",
+                    })
             else:
                 handle_input(data)
     except WebSocketDisconnect:
@@ -462,6 +805,9 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         streamer.clients.discard(websocket)
+        term_manager.unsubscribe_all(websocket)
+        if not streamer.clients:
+            keep_awake_stop()
 
 
 @app.post("/api/command")

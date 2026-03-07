@@ -442,7 +442,8 @@ html, body {
 }
 
 #mobile-kb-btn.active,
-#fs-kb-btn.active {
+#fs-kb-btn.active,
+#mobile-kb-btn2.active {
     background: rgba(16, 185, 129, 0.15);
     border-color: var(--success);
     color: var(--success);
@@ -475,6 +476,7 @@ html, body {
     position: relative;
     background: #0a0a0a;
     overflow: auto;
+    -webkit-overflow-scrolling: touch;
 }
 
 .canvas-wrapper {
@@ -490,6 +492,7 @@ html, body {
     cursor: default;
     display: none;
     image-rendering: auto;
+    will-change: width, height;
 }
 
 #remote-canvas.controlling {
@@ -544,8 +547,14 @@ body.fullscreen .desktop-container {
 }
 
 #toolbar-shortcuts,
-#fs-shortcuts {
+#fs-shortcuts,
+#mobile-shortcuts {
     display: contents;
+}
+
+/* === Mobile Floating Toolbar (hidden by default, shown on mobile) === */
+.mobile-toolbar {
+    display: none;
 }
 
 body.fullscreen .fs-toolbar {
@@ -608,69 +617,136 @@ body.fullscreen .fs-toolbar:hover {
     to { transform: rotate(360deg); }
 }
 
-/* === Terminal === */
-.terminal-container {
-    flex: 1;
+/* === Terminal (xterm.js tabs) === */
+.term-tab-bar {
     display: flex;
-    flex-direction: column;
+    align-items: stretch;
     background: var(--bg-darkest);
-    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    padding: 0;
+    gap: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    min-height: 38px;
 }
 
-.terminal-output {
+.term-tab-bar::-webkit-scrollbar {
+    display: none;
+}
+
+.term-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
     flex: 1;
-    padding: 16px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-all;
+    min-width: 0;
 }
 
-.terminal-output .cmd-line {
-    color: var(--primary);
-    font-weight: 600;
-}
-
-.terminal-output .stdout {
-    color: var(--text);
-}
-
-.terminal-output .stderr {
-    color: var(--danger);
-}
-
-.terminal-output .info {
-    color: var(--text-dim);
-    font-style: italic;
-}
-
-.terminal-input-row {
+.term-tab {
     display: flex;
     align-items: center;
-    padding: 12px 16px;
-    background: var(--bg-card);
-    border-top: 1px solid var(--border);
     gap: 8px;
+    padding: 0 16px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--transition);
+    user-select: none;
+    border-right: 1px solid var(--border);
+    background: var(--bg-darkest);
+    min-width: 100px;
+}
+
+.term-tab:hover {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.term-tab.active {
+    color: var(--text);
+    background: #050810;
+    border-bottom: 2px solid var(--primary);
+}
+
+.term-tab span {
+    flex: 1;
+}
+
+.term-tab-close {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: all var(--transition);
     flex-shrink: 0;
 }
 
-.terminal-prompt {
-    color: var(--success);
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-weight: 700;
-    font-size: 14px;
+.term-tab:hover .term-tab-close {
+    opacity: 0.6;
 }
 
-#terminal-input {
+.term-tab-close:hover {
+    opacity: 1 !important;
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.term-new-btn {
+    flex-shrink: 0;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    color: var(--text-dim) !important;
+    font-size: 18px !important;
+    font-weight: 400;
+    padding: 0 14px !important;
+    margin: 0;
+    min-height: 100%;
+    transition: all var(--transition);
+}
+
+.term-new-btn:hover {
+    color: var(--text) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.term-container {
     flex: 1;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-family: 'SF Mono', 'Fira Code', monospace;
-    font-size: 14px;
-    outline: none;
+    position: relative;
+    background: #050810;
+    overflow: hidden;
+}
+
+.term-instance {
+    position: absolute;
+    inset: 0;
+    padding: 4px;
+}
+
+.term-instance .xterm {
+    height: 100%;
+}
+
+.term-instance .xterm-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-light) transparent;
+}
+
+.term-instance .xterm-viewport::-webkit-scrollbar {
+    width: 6px;
+}
+
+.term-instance .xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 3px;
 }
 
 /* === File Manager (FileZilla-style) === */
@@ -1379,55 +1455,55 @@ body.fullscreen .fs-toolbar:hover {
 
     /* --- Bottom Tab Bar --- */
     .sidebar {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        top: auto;
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        top: auto !important;
         width: 100% !important;
-        height: auto;
-        flex-direction: row;
-        border-right: none;
-        border-top: 1px solid var(--border);
+        height: auto !important;
+        flex-direction: row !important;
+        border-right: none !important;
+        border-top: 1px solid var(--border) !important;
         z-index: 200;
-        --sidebar-width: 0px;
     }
 
     .sidebar-header,
     .sidebar-footer {
-        display: none;
+        display: none !important;
     }
 
     .nav-items {
-        display: flex;
-        flex-direction: row;
-        padding: 0;
-        width: 100%;
+        display: flex !important;
+        flex-direction: row !important;
+        padding: 0 !important;
+        width: 100% !important;
         overflow-x: auto;
+        overflow-y: hidden !important;
     }
 
     .nav-item {
         flex: 1;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px 4px 6px;
-        border-left: none;
+        flex-direction: column !important;
+        gap: 2px !important;
+        padding: 8px 4px 6px !important;
+        border-left: none !important;
         border-top: 2px solid transparent;
         border-bottom: none;
         font-size: 10px;
-        justify-content: center;
-        align-items: center;
+        justify-content: center !important;
+        align-items: center !important;
         min-width: 0;
     }
 
     .nav-item.active {
-        border-left-color: transparent;
+        border-left-color: transparent !important;
         border-top-color: var(--primary);
         background: rgba(59, 130, 246, 0.06);
     }
 
     .nav-item span:last-child {
-        display: block;
+        display: block !important;
         font-size: 10px;
         line-height: 1.2;
     }
@@ -1445,14 +1521,16 @@ body.fullscreen .fs-toolbar:hover {
         height: 100dvh;
     }
 
-    /* --- Page Header --- */
+    /* --- Page Header - stacked on mobile --- */
     .page-header {
-        padding: 8px 12px;
-        gap: 6px;
+        padding: 6px 10px;
+        gap: 4px;
+        flex-direction: column;
+        align-items: stretch;
     }
 
     .page-header h2 {
-        font-size: 14px;
+        font-size: 13px;
         white-space: nowrap;
     }
 
@@ -1473,14 +1551,24 @@ body.fullscreen .fs-toolbar:hover {
         display: none;
     }
 
+    /* Hide text labels in toolbar buttons on mobile */
+    .desktop-controls .btn-label {
+        display: none;
+    }
+
     .btn-sm {
-        padding: 6px 10px;
+        padding: 6px 8px;
         font-size: 12px;
     }
 
+    .vk-combo {
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+
     .toolbar-select {
-        padding: 6px 8px;
-        font-size: 12px;
+        padding: 6px 6px;
+        font-size: 11px;
     }
 
     /* --- Canvas - touch friendly --- */
@@ -1579,26 +1667,75 @@ body.fullscreen .fs-toolbar:hover {
     }
 
     /* --- Terminal --- */
-    .terminal-output {
-        padding: 10px;
-        font-size: 12px;
+    .term-tab-bar {
+        padding: 0 2px;
     }
 
-    .terminal-input-row {
-        padding: 10px 12px;
+    .term-tab {
+        padding: 6px 8px;
+        font-size: 11px;
     }
 
-    #terminal-input {
-        font-size: 14px;
+    .term-instance {
+        padding: 2px;
+    }
+
+    /* --- Hide page header on mobile desktop page --- */
+    #desktop-page > .page-header {
+        display: none !important;
+    }
+
+    /* --- Mobile Floating Toolbar --- */
+    .mobile-toolbar {
+        display: flex !important;
+        position: fixed;
+        bottom: 56px;
+        left: 0;
+        right: 0;
+        z-index: 150;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        background: rgba(17, 24, 39, 0.92);
+        backdrop-filter: blur(12px);
+        border-top: 1px solid var(--border-light);
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .mobile-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .mobile-toolbar .btn-sm {
+        flex-shrink: 0;
+        min-height: 36px;
+        padding: 6px 10px;
+    }
+
+    .mobile-toolbar .vk-combo {
+        flex-shrink: 0;
+        min-height: 36px;
+    }
+
+    /* Adjust content padding to account for mobile toolbar + tab bar */
+    .content {
+        padding-bottom: 96px !important;
     }
 
     /* --- Fullscreen overrides --- */
     body.fullscreen .content {
-        padding-bottom: 0;
+        padding-bottom: 0 !important;
         height: 100vh;
     }
 
     body.fullscreen .sidebar {
+        display: none !important;
+    }
+
+    body.fullscreen .mobile-toolbar {
         display: none !important;
     }
 
