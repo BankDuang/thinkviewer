@@ -148,6 +148,13 @@
                                 </svg>
                                 KB
                             </button>
+                            <button class="btn btn-sm" onclick="pasteFromClipboard()" title="Paste from clipboard (Ctrl+V / Cmd+V)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/>
+                                    <rect x="8" y="2" width="8" height="4" rx="1"/>
+                                </svg>
+                                <span class="btn-label">Paste</span>
+                            </button>
                             <button class="btn btn-sm" onclick="sendTextPrompt()" title="Send Text">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <line x1="17" y1="10" x2="3" y2="10"/>
@@ -195,6 +202,7 @@
                             <span id="fs-control-label">Control OFF</span>
                         </button>
                         <button class="btn btn-sm" id="fs-kb-btn" onclick="toggleMobileKeyboard()">KB</button>
+                        <button class="btn btn-sm" onclick="pasteFromClipboard()" title="Paste from clipboard">Paste</button>
                         <span id="fs-shortcuts"></span>
                         <button class="btn btn-sm" onclick="zoomOut()">-</button>
                         <span class="zoom-label" id="fs-zoom-label">Fit</span>
@@ -214,6 +222,12 @@
                         <button class="btn btn-sm" onclick="toggleFullscreen()" title="Fullscreen">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+                            </svg>
+                        </button>
+                        <button class="btn btn-sm" onclick="pasteFromClipboard()" title="Paste">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/>
+                                <rect x="8" y="2" width="8" height="4" rx="1"/>
                             </svg>
                         </button>
                         <button class="btn btn-sm" id="mobile-kb-btn2" onclick="toggleMobileKeyboard()">

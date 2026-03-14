@@ -2,6 +2,7 @@
 ThinkViewer - Remote Desktop Control Application
 Similar to TeamViewer, accessible via browser on port 19080
 """
+from __future__ import annotations
 
 import os
 import json
@@ -24,6 +25,7 @@ import fcntl
 import termios
 import threading
 import signal
+import atexit
 from pathlib import Path
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -235,17 +237,22 @@ class TerminalSession:
 
     def close(self):
         self.alive = False
+        # Kill the entire process group so child processes also die
         try:
-            os.kill(self.pid, signal.SIGTERM)
+            os.killpg(os.getpgid(self.pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
+            pass
+        # SIGKILL fallback after a brief wait
+        try:
+            pid_result, _ = os.waitpid(self.pid, os.WNOHANG)
+            if pid_result == 0:
+                os.killpg(os.getpgid(self.pid), signal.SIGKILL)
+                os.waitpid(self.pid, os.WNOHANG)
+        except (ChildProcessError, OSError):
             pass
         try:
             os.close(self.fd)
         except OSError:
-            pass
-        try:
-            os.waitpid(self.pid, os.WNOHANG)
-        except (ChildProcessError, OSError):
             pass
 
 
@@ -317,6 +324,9 @@ class TerminalManager:
 
 
 term_manager = TerminalManager()
+
+# Ensure all PTY sessions are killed when server exits (any exit path)
+atexit.register(lambda: term_manager.close_all())
 
 
 # ============================================================
@@ -457,8 +467,7 @@ class ScreenStreamer:
         self.running = False
         self.screen_width = 0
         self.screen_height = 0
-        self.last_key_time = 0.0
-        self.modifiers_dirty = False
+        self.modifier_down_times: dict[str, float] = {}  # key -> timestamp
 
     def _draw_cursor(self, pil_img):
         """Draw mouse cursor overlay on the captured image."""
@@ -525,14 +534,28 @@ class ScreenStreamer:
                         except Exception as e:
                             print(f"Capture error: {e}")
 
-                    # Auto-release stuck modifier keys after 1s of no key activity
-                    if self.modifiers_dirty and time.time() - self.last_key_time > 1.0:
-                        for key in ("ctrl", "alt", "shift", "command", "option"):
+                    # Auto-release any modifier held longer than 2s
+                    now = time.time()
+                    stale = [k for k, t in self.modifier_down_times.items()
+                             if now - t > 2.0]
+                    for key in stale:
+                        try:
+                            pyautogui.keyUp(key, _pause=False)
+                        except Exception:
+                            pass
+                        # Also release "option" alias when releasing "alt"
+                        if key == "alt":
                             try:
-                                pyautogui.keyUp(key, _pause=False)
+                                pyautogui.keyUp("option", _pause=False)
                             except Exception:
                                 pass
-                        self.modifiers_dirty = False
+                        self.modifier_down_times.pop(key, None)
+
+                    # Always keep fn released
+                    try:
+                        pyautogui.keyUp("fn", _pause=False)
+                    except Exception:
+                        pass
 
                     await asyncio.sleep(1.0 / self.fps)
         except asyncio.CancelledError:
@@ -587,22 +610,25 @@ def handle_input(data):
             key = data.get("key", "")
             if key:
                 pyautogui.keyDown(key, _pause=False)
-                streamer.last_key_time = time.time()
                 if key in ("ctrl", "alt", "shift", "command"):
-                    streamer.modifiers_dirty = True
+                    streamer.modifier_down_times[key] = time.time()
 
         elif event_type == "key_up":
             key = data.get("key", "")
             if key:
                 pyautogui.keyUp(key, _pause=False)
-                streamer.last_key_time = time.time()
+                streamer.modifier_down_times.pop(key, None)
+                # Also release "option" alias when releasing "alt"
+                if key == "alt":
+                    try:
+                        pyautogui.keyUp("option", _pause=False)
+                    except Exception:
+                        pass
 
         elif event_type == "key_press":
             key = data.get("key", "")
             if key:
                 pyautogui.press(key, _pause=False)
-                streamer.last_key_time = time.time()
-                streamer.modifiers_dirty = True
 
         elif event_type == "key_combo":
             keys = data.get("keys", [])
@@ -611,14 +637,12 @@ def handle_input(data):
                 try:
                     pyautogui.hotkey(*keys, _pause=False)
                 finally:
-                    # Always release modifiers to prevent them getting stuck
                     for m in modifiers:
                         try:
                             pyautogui.keyUp(m, _pause=False)
                         except Exception:
                             pass
-                streamer.last_key_time = time.time()
-                streamer.modifiers_dirty = True
+                    streamer.modifier_down_times.clear()
 
         elif event_type == "release_modifiers":
             for key in ("ctrl", "alt", "shift", "command", "option"):
@@ -626,7 +650,7 @@ def handle_input(data):
                     pyautogui.keyUp(key, _pause=False)
                 except Exception:
                     pass
-            streamer.modifiers_dirty = False
+            streamer.modifier_down_times.clear()
 
         elif event_type == "type_text":
             text = data.get("text", "")

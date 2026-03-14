@@ -45,11 +45,38 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('login-btn').addEventListener('click', login);
 
-    // Auto-focus password input
-    document.getElementById('password-input').focus();
+    // Try auto-login with saved session
+    const savedToken = localStorage.getItem('tv_session_token');
+    if (savedToken) {
+        tryResumeSession(savedToken);
+    } else {
+        document.getElementById('password-input').focus();
+    }
 });
 
 // === Auth ===
+async function tryResumeSession(token) {
+    try {
+        const res = await fetch('/api/info', {
+            headers: { 'Authorization': 'Bearer ' + token },
+        });
+        if (!res.ok) throw new Error('expired');
+
+        // Token still valid — skip login
+        state.token = token;
+        document.getElementById('login-view').classList.add('hidden');
+        document.getElementById('main-view').classList.remove('hidden');
+        connectWebSocket();
+        loadDeviceInfo();
+        loadDirectory('~');
+        initFileManager();
+    } catch (_) {
+        // Token expired or invalid — clear and show login
+        localStorage.removeItem('tv_session_token');
+        document.getElementById('password-input').focus();
+    }
+}
+
 async function login() {
     const passwordInput = document.getElementById('password-input');
     const password = passwordInput.value.trim();
@@ -78,6 +105,7 @@ async function login() {
 
         const data = await res.json();
         state.token = data.token;
+        localStorage.setItem('tv_session_token', data.token);
         errorDiv.classList.add('hidden');
 
         // Switch to main view
@@ -113,6 +141,8 @@ async function logout() {
             body: JSON.stringify({ token: state.token }),
         });
     } catch (_) {}
+
+    localStorage.removeItem('tv_session_token');
 
     if (state.ws) {
         state.ws.close();
@@ -718,6 +748,9 @@ function setupCanvasEvents() {
     }, { passive: false });
 }
 
+// Track pressed modifiers for safety release
+const _pressedModifiers = {};  // key -> timestamp
+
 function handleKeyDown(e) {
     // Only capture when desktop page is active and controlling
     if (state.currentPage !== 'desktop' || !state.controlling) return;
@@ -726,20 +759,36 @@ function handleKeyDown(e) {
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-    // Always prevent default so the browser doesn't intercept Cmd/Ctrl combos
+    // Ctrl/Cmd+V → paste from client clipboard to remote
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        e.stopPropagation();
+        releaseAllModifiers();
+        pasteFromClipboard();
+        return;
+    }
+
+    // Let browser-level shortcuts pass through (new tab, new window, copy, etc.)
+    const BROWSER_KEYS = ['t', 'n', 'w', 'r', 'l', 'c'];
+    if ((e.ctrlKey || e.metaKey) && BROWSER_KEYS.includes(e.key.toLowerCase())) {
+        releaseAllModifiers();
+        return;
+    }
+
+    // Prevent default for everything else so keys go to remote
     e.preventDefault();
     e.stopPropagation();
 
-    // Don't send bare modifier/special keys alone (but DO send key_down for modifiers)
-    const MODIFIER_KEYS = ['Control', 'Alt', 'Shift', 'Meta'];
+    const MODIFIER_MAP = { 'Control': 'ctrl', 'Alt': 'alt', 'Shift': 'shift', 'Meta': 'command' };
     const IGNORE_KEYS = ['Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'];
 
     if (IGNORE_KEYS.includes(e.key)) return;
 
-    // Send modifier key_down/key_up separately
-    if (MODIFIER_KEYS.includes(e.key)) {
+    // Send modifier key_down separately and track
+    if (MODIFIER_MAP[e.key]) {
         if (!e.repeat) {
-            const modKey = { 'Control': 'ctrl', 'Alt': 'alt', 'Shift': 'shift', 'Meta': 'command' }[e.key];
+            const modKey = MODIFIER_MAP[e.key];
+            _pressedModifiers[modKey] = Date.now();
             sendControl({ type: 'key_down', key: modKey });
         }
         return;
@@ -765,7 +814,9 @@ function handleKeyUp(e) {
 
     const MODIFIER_MAP = { 'Control': 'ctrl', 'Alt': 'alt', 'Shift': 'shift', 'Meta': 'command' };
     if (MODIFIER_MAP[e.key]) {
-        sendControl({ type: 'key_up', key: MODIFIER_MAP[e.key] });
+        const modKey = MODIFIER_MAP[e.key];
+        delete _pressedModifiers[modKey];
+        sendControl({ type: 'key_up', key: modKey });
         return;
     }
 
@@ -774,10 +825,24 @@ function handleKeyUp(e) {
 }
 
 function releaseAllModifiers() {
+    // Clear local tracking
+    for (const k in _pressedModifiers) delete _pressedModifiers[k];
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
         state.ws.send(JSON.stringify({ type: 'release_modifiers' }));
     }
 }
+
+// Periodic safety: release modifiers stuck for more than 3s on client side
+setInterval(() => {
+    if (!state.controlling) return;
+    const now = Date.now();
+    for (const [key, time] of Object.entries(_pressedModifiers)) {
+        if (now - time > 3000) {
+            delete _pressedModifiers[key];
+            sendControl({ type: 'key_up', key });
+        }
+    }
+}, 1000);
 
 // === Control Toggle ===
 function toggleControl() {
@@ -994,6 +1059,48 @@ function updateKbButtons() {
         updateKbButtons();
     });
 })();
+
+async function pasteFromClipboard() {
+    // Try Clipboard API first (works on HTTPS / localhost with permission)
+    if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text) {
+                sendControl({ type: 'type_text', text });
+                showNotification('Pasted ' + text.length + ' chars', 'success');
+                return;
+            }
+            showNotification('Clipboard is empty', 'info');
+            return;
+        } catch (_) {
+            // Clipboard API denied — fall through to fallback
+        }
+    }
+
+    // Fallback: open Send Text dialog so user can Ctrl+V manually
+    document.getElementById('text-dialog').classList.remove('hidden');
+    const input = document.getElementById('send-text-input');
+    input.value = '';
+    input.placeholder = 'Clipboard access denied — press Ctrl+V here, then click Send';
+    input.focus();
+}
+
+function _handlePasteEvent(e) {
+    // Handle paste events when controlling (catches Ctrl+V even without Clipboard API)
+    if (state.currentPage !== 'desktop' || !state.controlling) return;
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (text) {
+        releaseAllModifiers();
+        sendControl({ type: 'type_text', text });
+        showNotification('Pasted ' + text.length + ' chars', 'success');
+    }
+}
+
+document.addEventListener('paste', _handlePasteEvent);
 
 function sendTextPrompt() {
     document.getElementById('text-dialog').classList.remove('hidden');
