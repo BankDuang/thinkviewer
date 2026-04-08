@@ -1297,19 +1297,55 @@ function _termSendInput(sessionId, text) {
 }
 
 // ── Terminal image paste ──────────────────────────────────────────────────────
-// How it works:
-//   1. Browser intercepts paste event, detects image in clipboardData
-//   2. Image is base64-encoded and sent over the existing WebSocket as
-//      a "term_paste_image" control message (same WS used for PTY I/O)
-//   3. Server saves image to /tmp, sets the SERVER OS clipboard via
-//      osascript (macOS) / xclip / wl-copy (Linux)
-//   4. Server injects \x16 (Ctrl-V) into the PTY — Claude Code's own
-//      Ctrl-V handler fires, reads the OS clipboard, attaches the image
-//   5. Server replies with "term_image_pasted"; client shows preview
+// Flow (macOS):
+//   1. User presses Ctrl/Cmd+V (or clicks "Paste Image" button)
+//   2. navigator.clipboard.read() reads the image directly from the OS
+//      clipboard (works on localhost & HTTPS — no paste event needed)
+//   3. Image bytes → "term_paste_image" over the existing WebSocket
+//   4. Server saves to /tmp, sets macOS pasteboard via osascript,
+//      injects \x16 (Ctrl-V) into the PTY
+//   5. Claude Code's Ctrl-V handler calls osascript, finds the image,
+//      attaches it — identical to local use
+//   6. Server replies "term_image_pasted"; client shows inline preview
+//
+// WHY paste event alone does NOT work:
+//   xterm.js calls event.preventDefault() on keydown before our handler
+//   runs, so the browser never fires a paste event.  We bypass this by
+//   calling navigator.clipboard.read() directly inside the key handler.
 
-let _pendingImagePreview = null; // { dataUrl } while awaiting server reply
+let _pendingImagePreview = null;
+let _termImgPasteInFlight = false; // guard against double-paste
+
+// Called from "Paste Image" button
+async function pasteImageToTerminal() {
+    const sessionId = termState.activeTab;
+    if (!sessionId) { showNotification('Open a terminal first', 'info'); return; }
+    const blob = await _readImageFromClipboard();
+    if (blob) {
+        _termPasteImage(sessionId, blob);
+    } else {
+        showNotification('No image in clipboard — copy a screenshot first', 'info');
+    }
+}
+
+// Read an image Blob from the OS clipboard via Clipboard API.
+// Returns null if unavailable or no image found.
+async function _readImageFromClipboard() {
+    if (!navigator.clipboard?.read) return null;
+    try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            const imgType = item.types.find(t => t.startsWith('image/'));
+            if (imgType) return item.getType(imgType);
+        }
+    } catch (_) {}
+    return null;
+}
 
 async function _termPasteImage(sessionId, blob) {
+    if (_termImgPasteInFlight) return;
+    _termImgPasteInFlight = true;
+    setTimeout(() => { _termImgPasteInFlight = false; }, 3000);
     _showImagePastePreview(null, null, 'Uploading…');
 
     // Read blob → dataUrl (for thumbnail) and split off base64 payload
@@ -1320,6 +1356,7 @@ async function _termPasteImage(sessionId, blob) {
     });
 
     if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        _termImgPasteInFlight = false;
         _hideImagePastePreview();
         showNotification('Not connected', 'error');
         return;
@@ -1458,33 +1495,43 @@ function _setupTerminalInstance(sessionId, bufferData) {
         }
     });
 
-    // Intercept paste on xterm's textarea BEFORE xterm handles it
-    // (prevents double-paste: once by xterm via onData, once by us)
+    // Paste event fallback — fires on non-secure HTTP when Clipboard API is
+    // unavailable, or on browsers that still deliver a paste event despite xterm.
     const xtermTextarea = el.querySelector('.xterm-helper-textarea');
     if (xtermTextarea) {
         xtermTextarea.addEventListener('paste', (e) => {
             e.preventDefault();
-            e.stopImmediatePropagation(); // block xterm's own paste handler
+            e.stopImmediatePropagation();
 
-            // Check for image data first
-            const items = e.clipboardData?.items || [];
-            for (const item of items) {
-                if (item.type.startsWith('image/')) {
-                    const blob = item.getAsFile();
-                    if (blob) { _termPasteImage(sessionId, blob); return; }
+            // Image (only if Clipboard API path hasn't already handled it)
+            if (!_termImgPasteInFlight) {
+                const items = e.clipboardData?.items || [];
+                for (const item of items) {
+                    if (item.type.startsWith('image/')) {
+                        const blob = item.getAsFile();
+                        if (blob) { _termPasteImage(sessionId, blob); return; }
+                    }
                 }
             }
 
-            // Fall back to text paste
+            // Text
             const text = (e.clipboardData || window.clipboardData)?.getData('text');
             if (text) _termSendInput(sessionId, text);
         }, true);
     }
 
-    // Ctrl+V / Cmd+V: block xterm, let browser fire paste event on textarea
+    // Ctrl/Cmd+V: read clipboard directly via Clipboard API.
+    // We CANNOT rely on the paste event here because xterm.js calls
+    // event.preventDefault() before our handler runs — the browser
+    // never fires a paste event.  Use navigator.clipboard.read() instead,
+    // which works on localhost (secure context) and any HTTPS deployment.
     term.attachCustomKeyEventHandler((e) => {
         if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-            return false;
+            _readImageFromClipboard().then((blob) => {
+                if (blob) _termPasteImage(sessionId, blob);
+                // No image → paste event (if it fires) handles text via xtermTextarea listener
+            });
+            return false; // prevent xterm sending raw \x16 to PTY
         }
         return true;
     });

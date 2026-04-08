@@ -610,24 +610,29 @@ def _set_clipboard_image(path: str, mime: str = "image/png") -> bool:
     try:
         system = platform.system()
         if system == "Darwin":
+            # capture_output must NOT be used — osascript needs GUI session
+            # access for clipboard operations; piped stdio breaks that on macOS.
             subprocess.run(
                 ["osascript", "-e",
                  f'set the clipboard to (read (POSIX file "{path}") as «class PNGf»)'],
-                timeout=5, check=True, capture_output=True,
+                timeout=5, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return True
         # Linux – try xclip (X11) then wl-copy (Wayland)
         if shutil.which("xclip"):
             subprocess.run(
                 ["xclip", "-selection", "clipboard", "-t", mime, "-i", path],
-                timeout=5, check=True, capture_output=True,
+                timeout=5, check=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return True
         if shutil.which("wl-copy"):
             with open(path, "rb") as fh:
                 subprocess.run(
                     ["wl-copy", "--type", mime],
-                    stdin=fh, timeout=5, check=True, capture_output=True,
+                    stdin=fh, timeout=5, check=True,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
             return True
     except Exception as exc:
@@ -661,6 +666,13 @@ def _auto_update_loop():
             remote = _git_run("rev-parse", "FETCH_HEAD").stdout.strip()
 
             if local and remote and local != remote:
+                # Only update when remote is strictly ahead of local.
+                # If local is ahead (unpushed commits), skip — don't wipe work.
+                is_ancestor = _git_run("merge-base", "--is-ancestor", local, remote)
+                if is_ancestor.returncode != 0:
+                    # local is NOT an ancestor of remote = local is ahead or diverged
+                    time.sleep(30)
+                    continue
                 print(
                     f"\n[AutoUpdate] New version detected "
                     f"({local[:7]} -> {remote[:7]}), applying update...",
