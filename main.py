@@ -469,14 +469,20 @@ class ScreenStreamer:
         self.screen_width = 0
         self.screen_height = 0
         self.modifier_down_times: dict[str, float] = {}  # key -> timestamp
+        # Physical pixels per logical pixel (>1 on HiDPI/Retina displays).
+        # mss captures physical pixels; pyautogui uses logical pixels.
+        self._hiDPI_ratio = 1.0
 
     def _draw_cursor(self, pil_img):
         """Draw mouse cursor overlay on the captured image."""
         try:
             cx, cy = pyautogui.position()
-            cx = int(cx * self.scale)
-            cy = int(cy * self.scale)
-            s = max(14, int(22 * self.scale))
+            # cursor is in logical pixels; image width = logical_w * scale
+            effective_scale = self.scale / self._hiDPI_ratio
+            img_scale = self._hiDPI_ratio * effective_scale  # == self.scale
+            cx = int(cx * img_scale)
+            cy = int(cy * img_scale)
+            s = max(14, int(22 * img_scale))
             draw = ImageDraw.Draw(pil_img)
 
             # Arrow cursor polygon (white fill, black outline)
@@ -498,8 +504,21 @@ class ScreenStreamer:
         try:
             with mss.mss() as sct:
                 monitor = sct.monitors[1]
-                self.screen_width = monitor["width"]
-                self.screen_height = monitor["height"]
+                phys_w, phys_h = monitor["width"], monitor["height"]
+
+                # On HiDPI/Retina displays mss returns physical pixels while
+                # pyautogui (mouse control) uses logical (OS-scaled) pixels.
+                # We store logical dimensions for coordinate mapping so clicks
+                # land at the correct position regardless of display scaling.
+                try:
+                    logical_w, logical_h = pyautogui.size()
+                    self._hiDPI_ratio = phys_w / logical_w if logical_w > 0 else 1.0
+                except Exception:
+                    logical_w, logical_h = phys_w, phys_h
+                    self._hiDPI_ratio = 1.0
+
+                self.screen_width = logical_w
+                self.screen_height = logical_h
 
                 while self.running:
                     if self.clients:
@@ -507,9 +526,13 @@ class ScreenStreamer:
                             img = sct.grab(monitor)
                             pil_img = Image.frombytes("RGB", img.size, img.bgra, "raw", "BGRX")
 
-                            if self.scale < 1.0:
-                                new_w = int(pil_img.width * self.scale)
-                                new_h = int(pil_img.height * self.scale)
+                            # effective_scale maps physical capture → output image.
+                            # scale=1.0 always produces logical-resolution output,
+                            # regardless of HiDPI ratio. scale=0.5 gives half that.
+                            effective_scale = self.scale / self._hiDPI_ratio
+                            if abs(effective_scale - 1.0) > 0.005:
+                                new_w = max(1, int(pil_img.width * effective_scale))
+                                new_h = max(1, int(pil_img.height * effective_scale))
                                 pil_img = pil_img.resize((new_w, new_h), Image.LANCZOS)
 
                             self._draw_cursor(pil_img)
@@ -568,7 +591,7 @@ class ScreenStreamer:
         if fps is not None:
             self.fps = max(1, min(30, int(fps)))
         if scale is not None:
-            self.scale = max(0.25, min(1.5, float(scale)))
+            self.scale = max(0.25, min(2.0, float(scale)))
 
 
 streamer = ScreenStreamer()
