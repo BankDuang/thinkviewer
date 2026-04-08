@@ -326,6 +326,10 @@ class TerminalManager:
 
 term_manager = TerminalManager()
 
+# All currently-authenticated WebSocket connections (used to broadcast
+# terminal create/close events to every connected client).
+_all_ws: set = set()
+
 # Ensure all PTY sessions are killed when server exits (any exit path)
 atexit.register(lambda: term_manager.close_all())
 
@@ -898,6 +902,7 @@ async def websocket_endpoint(websocket: WebSocket):
     keep_awake_start()
 
     streamer.clients.add(websocket)
+    _all_ws.add(websocket)
     await websocket.send_json({
         "type": "auth_ok",
         "screen_width": streamer.screen_width,
@@ -924,6 +929,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     "session_id": session.session_id,
                     "buffer": "",
                 })
+                # Notify every OTHER connected client so they can subscribe
+                for other in list(_all_ws):
+                    if other is not websocket:
+                        try:
+                            await other.send_json({
+                                "type": "term_new",
+                                "session_id": session.session_id,
+                            })
+                        except Exception:
+                            pass
             elif msg_type == "term_input":
                 sid = data.get("session_id", "")
                 session = term_manager.get(sid)
@@ -939,10 +954,15 @@ async def websocket_endpoint(websocket: WebSocket):
             elif msg_type == "term_close":
                 sid = data.get("session_id", "")
                 term_manager.close(sid)
-                await websocket.send_json({
-                    "type": "term_closed",
-                    "session_id": sid,
-                })
+                # Broadcast close to ALL clients so every tab bar updates
+                for other in list(_all_ws):
+                    try:
+                        await other.send_json({
+                            "type": "term_closed",
+                            "session_id": sid,
+                        })
+                    except Exception:
+                        pass
             elif msg_type == "term_list":
                 await websocket.send_json({
                     "type": "term_list",
@@ -1011,6 +1031,7 @@ async def websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         streamer.clients.discard(websocket)
+        _all_ws.discard(websocket)
         term_manager.unsubscribe_all(websocket)
         if not streamer.clients:
             keep_awake_stop()

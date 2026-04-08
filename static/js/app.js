@@ -1720,6 +1720,13 @@ function _handleTerminalWsMessage(data) {
             }
             break;
         }
+        case 'term_new': {
+            // Another client created a terminal — subscribe so we receive its output
+            if (!termState.terminals[data.session_id] && state.ws?.readyState === WebSocket.OPEN) {
+                state.ws.send(JSON.stringify({ type: 'term_subscribe', session_id: data.session_id }));
+            }
+            break;
+        }
         case 'term_image_pasted': {
             const pending = _pendingImagePreview;
             _pendingImagePreview = null;
