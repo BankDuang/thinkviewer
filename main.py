@@ -600,6 +600,41 @@ streamer = ScreenStreamer()
 # ============================================================
 # Auto-Updater (CI/CD)
 # ============================================================
+def _set_clipboard_image(path: str, mime: str = "image/png") -> bool:
+    """Copy an image file into the server OS clipboard.
+
+    Claude Code reads from the OS clipboard via osascript / xclip / wl-paste,
+    so setting it here lets Ctrl-V work inside the remote terminal exactly as
+    it does on a local machine.  Returns True if a clipboard tool was found.
+    """
+    try:
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(
+                ["osascript", "-e",
+                 f'set the clipboard to (read (POSIX file "{path}") as «class PNGf»)'],
+                timeout=5, check=True, capture_output=True,
+            )
+            return True
+        # Linux – try xclip (X11) then wl-copy (Wayland)
+        if shutil.which("xclip"):
+            subprocess.run(
+                ["xclip", "-selection", "clipboard", "-t", mime, "-i", path],
+                timeout=5, check=True, capture_output=True,
+            )
+            return True
+        if shutil.which("wl-copy"):
+            with open(path, "rb") as fh:
+                subprocess.run(
+                    ["wl-copy", "--type", mime],
+                    stdin=fh, timeout=5, check=True, capture_output=True,
+                )
+            return True
+    except Exception as exc:
+        print(f"[ClipboardBridge] set image failed: {exc}", flush=True)
+    return False
+
+
 def _git_run(*args, timeout=20):
     """Run a git command in the project directory."""
     return subprocess.run(
@@ -913,6 +948,49 @@ async def websocket_endpoint(websocket: WebSocket):
                         "session_id": sid,
                         "buffer": base64.b64encode(replay).decode() if replay else "",
                     })
+            elif msg_type == "term_paste_image":
+                # Client pasted an image; save it, prime the server clipboard,
+                # then inject Ctrl-V into the PTY so Claude Code picks it up.
+                sid = data.get("session_id", "")
+                img_b64 = data.get("data", "")
+                mime = data.get("mime", "image/png")
+                if not sid or not img_b64:
+                    continue
+                try:
+                    img_bytes = base64.b64decode(img_b64)
+                except Exception:
+                    continue
+                if len(img_bytes) > 50 * 1024 * 1024:
+                    await websocket.send_json({
+                        "type": "term_image_pasted",
+                        "error": "Image too large (max 50 MB)",
+                    })
+                    continue
+                ext = mime.split("/")[-1] if "/" in mime else "png"
+                # Normalise jpeg → jpg for file extension
+                if ext in ("jpeg",):
+                    ext = "jpg"
+                tmp_name = f"thinkviewer_img_{uuid.uuid4().hex[:8]}.{ext}"
+                tmp_path = os.path.join("/tmp", tmp_name)
+                with open(tmp_path, "wb") as fh:
+                    fh.write(img_bytes)
+                # Set the server OS clipboard so Claude Code can read the image
+                clipboard_ok = _set_clipboard_image(tmp_path, mime)
+                session = term_manager.get(sid)
+                if session and session.alive:
+                    if clipboard_ok:
+                        # Inject Ctrl-V → Claude Code's paste handler fires
+                        session.write(b"\x16")
+                    else:
+                        # Fallback: type the file path so user can reference it
+                        session.write(tmp_path.encode())
+                await websocket.send_json({
+                    "type": "term_image_pasted",
+                    "session_id": sid,
+                    "path": tmp_path,
+                    "clipboard_ok": clipboard_ok,
+                    "size": len(img_bytes),
+                })
             else:
                 handle_input(data)
     except WebSocketDisconnect:

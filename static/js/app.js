@@ -1297,54 +1297,69 @@ function _termSendInput(sessionId, text) {
 }
 
 // ── Terminal image paste ──────────────────────────────────────────────────────
+// How it works:
+//   1. Browser intercepts paste event, detects image in clipboardData
+//   2. Image is base64-encoded and sent over the existing WebSocket as
+//      a "term_paste_image" control message (same WS used for PTY I/O)
+//   3. Server saves image to /tmp, sets the SERVER OS clipboard via
+//      osascript (macOS) / xclip / wl-copy (Linux)
+//   4. Server injects \x16 (Ctrl-V) into the PTY — Claude Code's own
+//      Ctrl-V handler fires, reads the OS clipboard, attaches the image
+//   5. Server replies with "term_image_pasted"; client shows preview
+
+let _pendingImagePreview = null; // { dataUrl } while awaiting server reply
 
 async function _termPasteImage(sessionId, blob) {
-    _showImagePastePreview(null, 'Uploading…');
+    _showImagePastePreview(null, null, 'Uploading…');
 
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-        const dataUrl = ev.target.result;               // "data:image/png;base64,..."
-        const base64 = dataUrl.split(',')[1];           // strip the prefix
+    // Read blob → dataUrl (for thumbnail) and split off base64 payload
+    const dataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.readAsDataURL(blob);
+    });
 
-        try {
-            const resp = await fetch('/api/terminal/paste-image', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + state.token,
-                },
-                body: JSON.stringify({ image: base64 }),
-            });
-            if (!resp.ok) throw new Error('Server error ' + resp.status);
-            const data = await resp.json();
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        _hideImagePastePreview();
+        showNotification('Not connected', 'error');
+        return;
+    }
 
-            // Type the file path into the terminal (no newline — user adds it)
-            _termSendInput(sessionId, data.path);
+    // Show thumbnail immediately while server processes
+    _showImagePastePreview(dataUrl, null, 'Setting remote clipboard…');
+    _pendingImagePreview = { dataUrl };
 
-            // Show the preview with the real thumbnail + path
-            _showImagePastePreview(dataUrl, data.path);
-        } catch (err) {
-            _hideImagePastePreview();
-            showNotification('Image paste failed: ' + err.message, 'error');
-        }
-    };
-    reader.readAsDataURL(blob);
+    state.ws.send(JSON.stringify({
+        type: 'term_paste_image',
+        session_id: sessionId,
+        mime: blob.type || 'image/png',
+        data: dataUrl.split(',')[1],   // base64 only, no data:… prefix
+    }));
 }
 
-function _showImagePastePreview(dataUrl, path) {
-    const panel = document.getElementById('term-img-preview');
-    const thumb = document.getElementById('term-img-thumb');
+function _showImagePastePreview(dataUrl, path, hint) {
+    const panel  = document.getElementById('term-img-preview');
+    const thumb  = document.getElementById('term-img-thumb');
     const pathEl = document.getElementById('term-img-path');
+    const hintEl = document.getElementById('term-img-hint');
+    const labelEl = document.getElementById('term-img-label');
     if (!panel) return;
 
     if (dataUrl) thumb.src = dataUrl;
-    pathEl.textContent = path;
-
-    // Clicking the path copies it to clipboard
-    pathEl.onclick = () => {
-        navigator.clipboard?.writeText(path).catch(() => {});
-        showNotification('Path copied', 'success');
-    };
+    if (path !== null && path !== undefined) {
+        pathEl.textContent = path;
+        pathEl.style.display = '';
+        pathEl.onclick = () => {
+            navigator.clipboard?.writeText(path).catch(() => {});
+            showNotification('Path copied', 'success');
+        };
+        if (labelEl) labelEl.textContent = 'Image saved →';
+    } else {
+        pathEl.style.display = 'none';
+    }
+    if (hint !== null && hint !== undefined && hintEl) {
+        hintEl.textContent = hint;
+    }
 
     panel.classList.remove('hidden');
     _refitAllTerminals();
@@ -1354,11 +1369,11 @@ function _hideImagePastePreview() {
     const panel = document.getElementById('term-img-preview');
     if (!panel) return;
     panel.classList.add('hidden');
+    _pendingImagePreview = null;
     _refitAllTerminals();
 }
 
 function _refitAllTerminals() {
-    // Refit every xterm instance after the preview panel changes height
     for (const info of Object.values(termState.terminals || {})) {
         try { info.fitAddon.fit(); } catch (_) {}
     }
@@ -1656,6 +1671,20 @@ function _handleTerminalWsMessage(data) {
             if (!termState.terminals[data.session_id]) {
                 _setupTerminalInstance(data.session_id, data.buffer || '');
             }
+            break;
+        }
+        case 'term_image_pasted': {
+            const pending = _pendingImagePreview;
+            _pendingImagePreview = null;
+            if (data.error) {
+                _hideImagePastePreview();
+                showNotification('Image paste failed: ' + data.error, 'error');
+                break;
+            }
+            const hint = data.clipboard_ok
+                ? 'Ctrl+V injected — Claude Code is attaching the image'
+                : 'No clipboard tool (xclip/osascript) — path typed into terminal';
+            _showImagePastePreview(pending?.dataUrl || null, data.path, hint);
             break;
         }
     }
