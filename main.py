@@ -958,6 +958,35 @@ async def execute_command(request: Request):
         return {"stdout": "", "stderr": str(e), "returncode": -1}
 
 
+@app.post("/api/terminal/paste-image")
+async def terminal_paste_image(request: Request):
+    """Receive a base64-encoded image from the client, save it to /tmp,
+    and return the path so the terminal can type it (e.g. for Claude Code)."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    image_b64 = body.get("image", "")
+    if not image_b64:
+        raise HTTPException(status_code=400, detail="No image data")
+
+    try:
+        image_bytes = base64.b64decode(image_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 image data")
+
+    if len(image_bytes) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (max 50 MB)")
+
+    tmp_name = f"thinkviewer_img_{uuid.uuid4().hex[:8]}.png"
+    tmp_path = os.path.join("/tmp", tmp_name)
+    with open(tmp_path, "wb") as f:
+        f.write(image_bytes)
+
+    return {"path": tmp_path, "size": len(image_bytes)}
+
+
 @app.get("/api/files/list")
 async def list_files(path: str = Query("~"), token: str = Query("")):
     if not verify_token(token):

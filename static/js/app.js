@@ -1296,6 +1296,76 @@ function _termSendInput(sessionId, text) {
     }
 }
 
+// ── Terminal image paste ──────────────────────────────────────────────────────
+
+async function _termPasteImage(sessionId, blob) {
+    _showImagePastePreview(null, 'Uploading…');
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        const dataUrl = ev.target.result;               // "data:image/png;base64,..."
+        const base64 = dataUrl.split(',')[1];           // strip the prefix
+
+        try {
+            const resp = await fetch('/api/terminal/paste-image', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + state.token,
+                },
+                body: JSON.stringify({ image: base64 }),
+            });
+            if (!resp.ok) throw new Error('Server error ' + resp.status);
+            const data = await resp.json();
+
+            // Type the file path into the terminal (no newline — user adds it)
+            _termSendInput(sessionId, data.path);
+
+            // Show the preview with the real thumbnail + path
+            _showImagePastePreview(dataUrl, data.path);
+        } catch (err) {
+            _hideImagePastePreview();
+            showNotification('Image paste failed: ' + err.message, 'error');
+        }
+    };
+    reader.readAsDataURL(blob);
+}
+
+function _showImagePastePreview(dataUrl, path) {
+    const panel = document.getElementById('term-img-preview');
+    const thumb = document.getElementById('term-img-thumb');
+    const pathEl = document.getElementById('term-img-path');
+    if (!panel) return;
+
+    if (dataUrl) thumb.src = dataUrl;
+    pathEl.textContent = path;
+
+    // Clicking the path copies it to clipboard
+    pathEl.onclick = () => {
+        navigator.clipboard?.writeText(path).catch(() => {});
+        showNotification('Path copied', 'success');
+    };
+
+    panel.classList.remove('hidden');
+    _refitAllTerminals();
+}
+
+function _hideImagePastePreview() {
+    const panel = document.getElementById('term-img-preview');
+    if (!panel) return;
+    panel.classList.add('hidden');
+    _refitAllTerminals();
+}
+
+function _refitAllTerminals() {
+    // Refit every xterm instance after the preview panel changes height
+    for (const info of Object.values(termState.terminals || {})) {
+        try { info.fitAddon.fit(); } catch (_) {}
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function _setupTerminalInstance(sessionId, bufferData) {
     const container = document.getElementById('term-container');
     if (!container) return;
@@ -1380,6 +1450,17 @@ function _setupTerminalInstance(sessionId, bufferData) {
         xtermTextarea.addEventListener('paste', (e) => {
             e.preventDefault();
             e.stopImmediatePropagation(); // block xterm's own paste handler
+
+            // Check for image data first
+            const items = e.clipboardData?.items || [];
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const blob = item.getAsFile();
+                    if (blob) { _termPasteImage(sessionId, blob); return; }
+                }
+            }
+
+            // Fall back to text paste
             const text = (e.clipboardData || window.clipboardData)?.getData('text');
             if (text) _termSendInput(sessionId, text);
         }, true);
