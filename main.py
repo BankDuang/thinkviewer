@@ -5,6 +5,7 @@ Similar to TeamViewer, accessible via browser on port 19080
 from __future__ import annotations
 
 import os
+import sys
 import json
 import uuid
 import hashlib
@@ -574,6 +575,74 @@ streamer = ScreenStreamer()
 
 
 # ============================================================
+# Auto-Updater (CI/CD)
+# ============================================================
+def _git_run(*args, timeout=20):
+    """Run a git command in the project directory."""
+    return subprocess.run(
+        ["git"] + list(args),
+        cwd=BASE_DIR,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _auto_update_loop():
+    """Background thread: check GitHub for updates every 30s, hard-pull & restart if found."""
+    # Brief delay so the server finishes startup before first check
+    time.sleep(10)
+    while True:
+        try:
+            fetch = _git_run("fetch", "origin", timeout=20)
+            if fetch.returncode != 0:
+                time.sleep(30)
+                continue
+
+            local = _git_run("rev-parse", "HEAD").stdout.strip()
+            remote = _git_run("rev-parse", "FETCH_HEAD").stdout.strip()
+
+            if local and remote and local != remote:
+                print(
+                    f"\n[AutoUpdate] New version detected "
+                    f"({local[:7]} -> {remote[:7]}), applying update...",
+                    flush=True,
+                )
+                reset = _git_run("reset", "--hard", "FETCH_HEAD")
+                if reset.returncode == 0:
+                    print("[AutoUpdate] Update applied. Restarting now...", flush=True)
+                    time.sleep(0.5)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                else:
+                    print(
+                        f"[AutoUpdate] Hard reset failed: {reset.stderr.strip()}",
+                        flush=True,
+                    )
+        except subprocess.TimeoutExpired:
+            print("[AutoUpdate] git fetch timed out, will retry in 30s.", flush=True)
+        except Exception as e:
+            print(f"[AutoUpdate] Error: {e}", flush=True)
+        time.sleep(30)
+
+
+def start_auto_updater():
+    """Start the auto-update background thread (only when running inside a git repo)."""
+    try:
+        check = _git_run("rev-parse", "--is-inside-work-tree", timeout=5)
+        if check.returncode != 0 or check.stdout.strip() != "true":
+            print("[AutoUpdate] Not a git repository — auto-updater disabled.")
+            return
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print("[AutoUpdate] git not available — auto-updater disabled.")
+        return
+
+    t = threading.Thread(target=_auto_update_loop, daemon=True, name="auto-updater")
+    t.start()
+    current = _git_run("rev-parse", "--short", "HEAD").stdout.strip()
+    print(f"[AutoUpdate] Started — current commit {current}, checking every 30s.")
+
+
+# ============================================================
 # Input Handler
 # ============================================================
 def handle_input(data):
@@ -1017,4 +1086,5 @@ async def update_stream_settings(request: Request):
 # ============================================================
 if __name__ == "__main__":
     import uvicorn
+    start_auto_updater()
     uvicorn.run(app, host="0.0.0.0", port=PORT)
