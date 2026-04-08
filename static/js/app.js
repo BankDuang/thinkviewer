@@ -199,6 +199,7 @@ function navigate(page) {
     if (page === 'settings') {
         loadDeviceInfo();
         renderShortcutsList();
+        renderKeyMappingsList();
     }
 
     // Show mobile toolbar only on desktop page
@@ -759,6 +760,18 @@ function handleKeyDown(e) {
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
+    // Check key mappings FIRST (client shortcut → remote shortcut)
+    if (!['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) {
+        const mapping = findKeyMapping(e);
+        if (mapping) {
+            e.preventDefault();
+            e.stopPropagation();
+            for (const k in _pressedModifiers) delete _pressedModifiers[k];
+            sendControl({ type: 'key_combo', keys: mapping.toKeys });
+            return;
+        }
+    }
+
     // Ctrl/Cmd+V → paste from client clipboard to remote
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         e.preventDefault();
@@ -991,6 +1004,132 @@ function removeShortcut(index) {
     if (removed[0]) showNotification('Removed: ' + removed[0].label, 'info');
 }
 
+// === Key Mapping (Client → Remote) ===
+function loadKeyMappings() {
+    try {
+        const saved = localStorage.getItem('tv_key_mappings');
+        if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [];
+}
+
+function saveKeyMappings(mappings) {
+    localStorage.setItem('tv_key_mappings', JSON.stringify(mappings));
+}
+
+function _keyMappingId(e) {
+    // Build a string like "ctrl+shift+a" from a keyboard event
+    const parts = [];
+    if (e.ctrlKey) parts.push('ctrl');
+    if (e.metaKey) parts.push('command');
+    if (e.altKey) parts.push('alt');
+    if (e.shiftKey) parts.push('shift');
+    const key = e.key.length === 1 ? e.key.toLowerCase() : (KEY_MAP[e.key] || e.key.toLowerCase());
+    if (!['control', 'alt', 'shift', 'meta'].includes(e.key.toLowerCase())) {
+        parts.push(key);
+    }
+    return parts.join('+');
+}
+
+function findKeyMapping(e) {
+    const id = _keyMappingId(e);
+    const mappings = loadKeyMappings();
+    return mappings.find(m => m.fromId === id) || null;
+}
+
+function renderKeyMappingsList() {
+    const list = document.getElementById('keymap-list');
+    if (!list) return;
+    const mappings = loadKeyMappings();
+    if (mappings.length === 0) {
+        list.innerHTML = '<span style="font-size:12px;color:var(--text-dim)">No mappings defined</span>';
+        return;
+    }
+    list.innerHTML = mappings.map((m, i) =>
+        `<div class="keymap-row">
+            <span class="shortcut-tag">${escapeHtml(m.fromLabel)}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" style="flex-shrink:0"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            <span class="shortcut-tag" style="color:var(--success);border-color:rgba(16,185,129,0.3)">${escapeHtml(m.toLabel)}</span>
+            <button class="sc-remove" onclick="removeKeyMapping(${i})" title="Remove">&times;</button>
+        </div>`
+    ).join('');
+}
+
+function removeKeyMapping(index) {
+    const mappings = loadKeyMappings();
+    const removed = mappings.splice(index, 1);
+    saveKeyMappings(mappings);
+    renderKeyMappingsList();
+    if (removed[0]) showNotification('Removed mapping: ' + removed[0].fromLabel + ' → ' + removed[0].toLabel, 'info');
+}
+
+// Capture a shortcut from the user pressing keys in an input
+function _setupKeyCaptureInput(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.addEventListener('keydown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const IGNORE = ['Fn', 'CapsLock', 'NumLock', 'ScrollLock', 'Dead', 'Process', 'Unidentified'];
+        if (IGNORE.includes(e.key)) return;
+        // Skip if only a modifier is pressed (wait for the actual key)
+        if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+
+        const parts = [];
+        if (e.ctrlKey) parts.push('ctrl');
+        if (e.metaKey) parts.push('command');
+        if (e.altKey) parts.push('alt');
+        if (e.shiftKey) parts.push('shift');
+        const key = e.key.length === 1 ? e.key.toLowerCase() : (KEY_MAP[e.key] || e.key.toLowerCase());
+        parts.push(key);
+
+        input.value = parts.join('+');
+        input.dataset.keys = JSON.stringify(parts);
+    });
+}
+
+function addKeyMapping() {
+    const fromInput = document.getElementById('keymap-from');
+    const toInput = document.getElementById('keymap-to');
+    const fromKeys = fromInput.dataset.keys;
+    const toKeys = toInput.dataset.keys;
+
+    if (!fromKeys || !toKeys) {
+        showNotification('Press a shortcut in both fields', 'error');
+        return;
+    }
+
+    const fromParts = JSON.parse(fromKeys);
+    const toParts = JSON.parse(toKeys);
+    const fromLabel = shortcutLabel(fromParts);
+    const toLabel = shortcutLabel(toParts);
+    const fromId = fromParts.join('+');
+
+    const mappings = loadKeyMappings();
+    if (mappings.some(m => m.fromId === fromId)) {
+        showNotification('Mapping for ' + fromLabel + ' already exists', 'error');
+        return;
+    }
+
+    mappings.push({ fromId, fromKeys: fromParts, fromLabel, toKeys: toParts, toLabel });
+    saveKeyMappings(mappings);
+
+    fromInput.value = '';
+    fromInput.dataset.keys = '';
+    toInput.value = '';
+    toInput.dataset.keys = '';
+
+    renderKeyMappingsList();
+    showNotification('Mapping added: ' + fromLabel + ' → ' + toLabel, 'success');
+}
+
+// Init capture inputs on page load
+document.addEventListener('DOMContentLoaded', () => {
+    _setupKeyCaptureInput('keymap-from');
+    _setupKeyCaptureInput('keymap-to');
+    renderKeyMappingsList();
+});
+
 // Init shortcuts on page load
 document.addEventListener('DOMContentLoaded', () => {
     renderToolbarShortcuts();
@@ -1085,22 +1224,22 @@ async function pasteFromClipboard() {
     input.focus();
 }
 
-function _handlePasteEvent(e) {
-    // Handle paste events when controlling (catches Ctrl+V even without Clipboard API)
-    if (state.currentPage !== 'desktop' || !state.controlling) return;
+document.addEventListener('paste', (e) => {
+    // Skip normal inputs (rename field, send text dialog, etc.)
     const tag = document.activeElement?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 
-    e.preventDefault();
     const text = (e.clipboardData || window.clipboardData)?.getData('text');
-    if (text) {
+    if (!text) return;
+
+    // Desktop page: send as type_text to remote
+    if (state.currentPage === 'desktop' && state.controlling) {
+        e.preventDefault();
         releaseAllModifiers();
         sendControl({ type: 'type_text', text });
         showNotification('Pasted ' + text.length + ' chars', 'success');
     }
-}
-
-document.addEventListener('paste', _handlePasteEvent);
+});
 
 function sendTextPrompt() {
     document.getElementById('text-dialog').classList.remove('hidden');
@@ -1131,6 +1270,7 @@ const termState = {
     tabs: [],        // ordered list of session IDs
     activeTab: null, // current session ID
     terminals: {},   // session_id -> { term, fitAddon, element }
+    names: {},       // session_id -> custom name (or default "Terminal N")
     tabCounter: 0,
 };
 
@@ -1144,6 +1284,16 @@ function createTerminalTab() {
         return;
     }
     state.ws.send(JSON.stringify({ type: 'term_create' }));
+}
+
+function _termSendInput(sessionId, text) {
+    if (text && state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+            type: 'term_input',
+            session_id: sessionId,
+            data: btoa(text),
+        }));
+    }
 }
 
 function _setupTerminalInstance(sessionId, bufferData) {
@@ -1223,9 +1373,32 @@ function _setupTerminalInstance(sessionId, bufferData) {
         }
     });
 
+    // Intercept paste on xterm's textarea BEFORE xterm handles it
+    // (prevents double-paste: once by xterm via onData, once by us)
+    const xtermTextarea = el.querySelector('.xterm-helper-textarea');
+    if (xtermTextarea) {
+        xtermTextarea.addEventListener('paste', (e) => {
+            e.preventDefault();
+            e.stopImmediatePropagation(); // block xterm's own paste handler
+            const text = (e.clipboardData || window.clipboardData)?.getData('text');
+            if (text) _termSendInput(sessionId, text);
+        }, true);
+    }
+
+    // Ctrl+V / Cmd+V: block xterm, let browser fire paste event on textarea
+    term.attachCustomKeyEventHandler((e) => {
+        if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+            return false;
+        }
+        return true;
+    });
+
     // Store
     termState.terminals[sessionId] = { term, fitAddon, element: el };
     termState.tabCounter++;
+    if (!termState.names[sessionId]) {
+        termState.names[sessionId] = 'Terminal ' + termState.tabCounter;
+    }
     termState.tabs.push(sessionId);
 
     // Render tabs and switch
@@ -1279,6 +1452,7 @@ function _removeTerminalTab(sessionId) {
         info.element.remove();
         delete termState.terminals[sessionId];
     }
+    delete termState.names[sessionId];
 
     const idx = termState.tabs.indexOf(sessionId);
     if (idx !== -1) termState.tabs.splice(idx, 1);
@@ -1296,20 +1470,73 @@ function _removeTerminalTab(sessionId) {
     }
 }
 
+let _tabClickTimer = null;
+
 function _renderTermTabs() {
     const tabsEl = document.getElementById('term-tabs');
     if (!tabsEl) return;
 
-    tabsEl.innerHTML = termState.tabs.map((sid, i) => {
+    tabsEl.innerHTML = termState.tabs.map((sid) => {
         const isActive = sid === termState.activeTab;
-        return `<div class="term-tab ${isActive ? 'active' : ''}" onclick="switchTerminalTab('${sid}')">
+        const name = termState.names[sid] || sid;
+        return `<div class="term-tab ${isActive ? 'active' : ''}" data-sid="${sid}">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.6">
                 <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
             </svg>
-            <span>Terminal ${i + 1}</span>
+            <span class="term-tab-name" data-sid="${sid}">${escapeHtml(name)}</span>
             <button class="term-tab-close" onclick="event.stopPropagation();closeTerminalTab('${sid}')" title="Close">&times;</button>
         </div>`;
     }).join('');
+
+    // Bind click/dblclick with timer so dblclick cancels the switch
+    tabsEl.querySelectorAll('.term-tab').forEach(tab => {
+        const sid = tab.dataset.sid;
+        tab.addEventListener('click', (e) => {
+            if (e.target.closest('.term-tab-close')) return;
+            clearTimeout(_tabClickTimer);
+            _tabClickTimer = setTimeout(() => switchTerminalTab(sid), 200);
+        });
+        tab.addEventListener('dblclick', (e) => {
+            if (e.target.closest('.term-tab-close')) return;
+            e.stopPropagation();
+            clearTimeout(_tabClickTimer);
+            renameTerminalTab(sid);
+        });
+    });
+}
+
+function renameTerminalTab(sessionId) {
+    const nameSpan = document.querySelector(`.term-tab-name[data-sid="${sessionId}"]`);
+    if (!nameSpan) return;
+
+    const currentName = termState.names[sessionId] || sessionId;
+    const tab = nameSpan.closest('.term-tab');
+
+    // Replace span with inline input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'term-tab-rename';
+    nameSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+        const newName = input.value.trim() || currentName;
+        termState.names[sessionId] = newName;
+        _renderTermTabs();
+        // Re-focus terminal
+        const active = termState.terminals[termState.activeTab];
+        if (active) active.term.focus();
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+        e.stopPropagation();
+    });
+    input.addEventListener('click', (e) => e.stopPropagation());
 }
 
 function _handleTerminalWsMessage(data) {
@@ -1448,30 +1675,87 @@ function renderClientFiles() {
     });
 }
 
-// Upload all client files to device
-async function uploadAllToDevice() {
-    if (clientFiles.length === 0) return;
-    const log = document.getElementById('transfer-log-inner');
-
-    for (let i = clientFiles.length - 1; i >= 0; i--) {
-        const file = clientFiles[i];
-        transferLog(`Uploading: ${file.name} (${formatBytes(file.size)})...`);
-
+// Upload a single file with XHR progress tracking
+function _uploadFileWithProgress(file, onProgress) {
+    return new Promise((resolve, reject) => {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('path', state.currentDir);
         formData.append('token', state.token);
 
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/files/upload');
+
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable && onProgress) {
+                onProgress(e.loaded, e.total);
+            }
+        });
+
+        xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error('Upload failed (HTTP ' + xhr.status + ')'));
+        });
+        xhr.addEventListener('error', () => reject(new Error('Network error')));
+        xhr.addEventListener('abort', () => reject(new Error('Aborted')));
+
+        xhr.send(formData);
+    });
+}
+
+function _showUploadProgress(text, pct) {
+    const bar = document.getElementById('upload-progress-bar');
+    const textEl = document.getElementById('upload-progress-text');
+    const pctEl = document.getElementById('upload-progress-pct');
+    const fill = document.getElementById('upload-progress-fill');
+    bar.classList.remove('hidden');
+    textEl.textContent = text;
+    pctEl.textContent = Math.round(pct) + '%';
+    fill.style.width = pct + '%';
+}
+
+function _hideUploadProgress() {
+    document.getElementById('upload-progress-bar').classList.add('hidden');
+}
+
+// Upload all client files to device
+async function uploadAllToDevice() {
+    if (clientFiles.length === 0) return;
+
+    const totalFiles = clientFiles.length;
+    const totalSize = clientFiles.reduce((sum, f) => sum + f.size, 0);
+    let completedFiles = 0;
+    let completedSize = 0;
+
+    // Upload from last to first so splice doesn't shift indices
+    for (let i = clientFiles.length - 1; i >= 0; i--) {
+        const file = clientFiles[i];
+        const fileNum = totalFiles - i;
+        transferLog(`Uploading: ${file.name} (${formatBytes(file.size)})...`);
+
         try {
-            const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
-            if (!res.ok) throw new Error('Upload failed');
+            await _uploadFileWithProgress(file, (loaded, total) => {
+                const filePct = (loaded / total) * 100;
+                const overallPct = totalSize > 0
+                    ? ((completedSize + loaded) / totalSize) * 100
+                    : (fileNum / totalFiles) * 100;
+                _showUploadProgress(
+                    `${fileNum}/${totalFiles} files — ${file.name} (${formatBytes(loaded)}/${formatBytes(total)})`,
+                    overallPct
+                );
+            });
+            completedSize += file.size;
+            completedFiles++;
             transferLog(`Uploaded: ${file.name}`, 'success');
             clientFiles.splice(i, 1);
         } catch (err) {
+            completedSize += file.size;
             transferLog(`Failed: ${file.name} - ${err.message}`, 'error');
         }
     }
 
+    _showUploadProgress(`Done — ${completedFiles}/${totalFiles} files uploaded`, 100);
+    setTimeout(_hideUploadProgress, 3000);
     renderClientFiles();
     refreshFiles();
 }
@@ -1482,21 +1766,25 @@ async function uploadClientFile(index) {
     if (!file) return;
 
     transferLog(`Uploading: ${file.name}...`);
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('path', state.currentDir);
-    formData.append('token', state.token);
 
     try {
-        const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
-        if (!res.ok) throw new Error('Upload failed');
+        await _uploadFileWithProgress(file, (loaded, total) => {
+            const pct = (loaded / total) * 100;
+            _showUploadProgress(
+                `1/1 files — ${file.name} (${formatBytes(loaded)}/${formatBytes(total)})`,
+                pct
+            );
+        });
         transferLog(`Uploaded: ${file.name}`, 'success');
         clientFiles.splice(index, 1);
         renderClientFiles();
         refreshFiles();
     } catch (err) {
-        transferLog(`Failed: ${file.name}`, 'error');
+        transferLog(`Failed: ${file.name} - ${err.message}`, 'error');
     }
+
+    _showUploadProgress('Done', 100);
+    setTimeout(_hideUploadProgress, 3000);
 }
 
 // Device file browser

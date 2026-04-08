@@ -699,6 +699,18 @@ body.fullscreen .fs-toolbar:hover {
     background: rgba(239, 68, 68, 0.15);
 }
 
+.term-tab-rename {
+    background: var(--bg-input);
+    border: 1px solid var(--primary);
+    border-radius: 3px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: inherit;
+    padding: 1px 6px;
+    width: 100px;
+    outline: none;
+}
+
 .term-new-btn {
     flex-shrink: 0;
     border: none !important;
@@ -1013,6 +1025,58 @@ body.fullscreen .fs-toolbar:hover {
     flex-shrink: 0;
 }
 
+/* Upload progress bar */
+.upload-progress-bar {
+    padding: 8px 14px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.upload-progress-bar.hidden {
+    display: none !important;
+}
+
+.upload-progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+}
+
+#upload-progress-text {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+#upload-progress-pct {
+    color: var(--primary);
+    font-weight: 700;
+    font-family: 'SF Mono', monospace;
+    margin-left: 12px;
+    flex-shrink: 0;
+}
+
+.upload-progress-track {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-darkest);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.upload-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--success));
+    border-radius: 3px;
+    transition: width 0.15s ease;
+}
+
 /* Transfer log */
 .transfer-log {
     max-height: 80px;
@@ -1275,6 +1339,94 @@ body.fullscreen .fs-toolbar:hover {
 
 .shortcut-key-input:focus {
     border-color: var(--primary);
+}
+
+/* === Key Mapping === */
+.keymap-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+    min-height: 20px;
+}
+
+.keymap-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.keymap-row .sc-remove {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-left: auto;
+}
+
+.keymap-row .sc-remove:hover {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.15);
+}
+
+.keymap-add-row {
+    margin-top: 4px;
+}
+
+.keymap-fields {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.keymap-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.keymap-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.keymap-field .shortcut-key-input {
+    cursor: pointer;
+    text-align: center;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-weight: 600;
+}
+
+.keymap-arrow {
+    flex-shrink: 0;
+    margin-bottom: 6px;
+}
+
+.keymap-add-btn {
+    margin-bottom: 0;
+    align-self: flex-end;
+}
+
+@media (max-width: 768px) {
+    .keymap-fields {
+        flex-wrap: wrap;
+    }
+
+    .keymap-field {
+        min-width: calc(50% - 20px);
+    }
+
+    .keymap-arrow {
+        display: none;
+    }
 }
 
 /* === Notification Toast === */

@@ -255,6 +255,16 @@
                     <div class="page-header">
                         <h2>File Manager</h2>
                     </div>
+                    <!-- Upload progress bar -->
+                    <div class="upload-progress-bar hidden" id="upload-progress-bar">
+                        <div class="upload-progress-info">
+                            <span id="upload-progress-text">Uploading...</span>
+                            <span id="upload-progress-pct">0%</span>
+                        </div>
+                        <div class="upload-progress-track">
+                            <div class="upload-progress-fill" id="upload-progress-fill" style="width:0%"></div>
+                        </div>
+                    </div>
                     <!-- Transfer log -->
                     <div class="transfer-log" id="transfer-log">
                         <div class="transfer-log-inner" id="transfer-log-inner"></div>
@@ -441,6 +451,32 @@
                                 <div class="shortcut-key-row">
                                     <input type="text" id="sc-key-input" placeholder="Key (e.g. d, f11, space)" class="shortcut-key-input" onkeydown="if(event.key==='Enter')addShortcut()">
                                     <button class="btn btn-sm btn-primary" onclick="addShortcut()">Add</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-card wide">
+                            <div class="card-header">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2">
+                                    <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/>
+                                    <polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+                                </svg>
+                                <h3>Key Mapping</h3>
+                            </div>
+                            <p class="shortcuts-hint">Map client shortcuts to remote shortcuts. e.g. Ctrl+C on your keyboard sends Cmd+C to the remote.</p>
+                            <div id="keymap-list" class="keymap-list"></div>
+                            <div class="keymap-add-row">
+                                <div class="keymap-fields">
+                                    <div class="keymap-field">
+                                        <label>Client (press keys)</label>
+                                        <input type="text" id="keymap-from" class="shortcut-key-input" placeholder="Press shortcut..." readonly>
+                                    </div>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2" class="keymap-arrow"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                                    <div class="keymap-field">
+                                        <label>Remote (press keys)</label>
+                                        <input type="text" id="keymap-to" class="shortcut-key-input" placeholder="Press shortcut..." readonly>
+                                    </div>
+                                    <button class="btn btn-sm btn-primary keymap-add-btn" onclick="addKeyMapping()">Add</button>
                                 </div>
                             </div>
                         </div>
