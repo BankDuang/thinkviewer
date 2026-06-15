@@ -8,17 +8,23 @@ interface TerminalState {
   sessions: Record<string, TermSessionMeta>
   order: string[]
   activeId: string | null
+  // A one-shot request (from the Servers app) to open a project in the Terminal:
+  // focus the tab named `name` if it exists, else create one cd'd into `cwd`.
+  pendingOpen: { name: string; cwd: string } | null
   upsert: (m: TermSessionMeta) => void
   remove: (id: string) => void
   rename: (id: string, name: string) => void
   setActive: (id: string | null) => void
   replaceAll: (list: TermSessionMeta[]) => void
+  requestOpen: (name: string, cwd: string) => void
+  consumeOpen: () => void
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: {},
   order: [],
   activeId: null,
+  pendingOpen: null,
 
   upsert(m) {
     const { sessions, order, activeId } = get()
@@ -65,5 +71,13 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       order,
       activeId: activeId && sessions[activeId] ? activeId : order[0] ?? null,
     })
+  },
+
+  requestOpen(name, cwd) {
+    set({ pendingOpen: { name, cwd } })
+  },
+
+  consumeOpen() {
+    set({ pendingOpen: null })
   },
 }))

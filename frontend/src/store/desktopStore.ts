@@ -1,16 +1,20 @@
 import { create } from 'zustand'
 import type { Wallpaper } from '@/types'
 import * as api from '@/lib/restClient'
+import { storage } from '@/lib/storage'
 import { notify } from './notificationStore'
 
 const DEFAULT_WALLPAPER = 'wp-aurora-blue.png'
 const urlFor = (id: string) => `/static/wallpapers/${id}`
+const MENU_STATS_KEY = 'menubarStats'
 
 interface DesktopState {
   wallpaperId: string | null
   wallpaperUrl: string
   wallpapers: Wallpaper[]
   loading: boolean
+  showMenuStats: boolean
+  setMenuStats: (v: boolean) => void
   loadWallpapers: () => Promise<void>
   setWallpaper: (id: string) => Promise<void>
   addUploaded: (wp: Wallpaper) => void
@@ -22,6 +26,12 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   wallpaperUrl: urlFor(DEFAULT_WALLPAPER),
   wallpapers: [],
   loading: false,
+  showMenuStats: storage.get<boolean>(MENU_STATS_KEY, true),
+
+  setMenuStats(v) {
+    storage.set(MENU_STATS_KEY, v)
+    set({ showMenuStats: v })
+  },
 
   async loadWallpapers() {
     set({ loading: true })

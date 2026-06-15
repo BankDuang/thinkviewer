@@ -13,6 +13,7 @@ interface DeployDialogProps {
 }
 
 const POLL_MS = 1500
+const DEFAULT_EMAIL = 'admin@thinkverse-ai.com'
 
 function PrereqRow({
   ok,
@@ -44,7 +45,7 @@ export function DeployDialog({ service, onClose, onChanged }: DeployDialogProps)
   const [infoError, setInfoError] = useState<string | null>(null)
 
   const [domain, setDomain] = useState(service.domain ?? '')
-  const [email, setEmail] = useState(service.email ?? '')
+  const [email, setEmail] = useState(service.email || DEFAULT_EMAIL)
   const [staging, setStaging] = useState(false)
 
   const [reachOutput, setReachOutput] = useState<string | null>(null)
@@ -330,7 +331,7 @@ export function DeployDialog({ service, onClose, onChanged }: DeployDialogProps)
               type="email"
               spellCheck={false}
               autoCapitalize="none"
-              placeholder="you@example.com"
+              placeholder={DEFAULT_EMAIL}
               disabled={inProgress}
               onChange={(e) => setEmail(e.target.value)}
             />

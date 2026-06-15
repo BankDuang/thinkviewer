@@ -3,18 +3,24 @@
 // so this module centralizes that so callers never have to think about it.
 
 import type {
+  CpDashboard,
+  CpRecord,
   DeployInfo,
   DeployLog,
   DeviceInfo,
   DiscoverResp,
+  GitPullResp,
   Interpreter,
   ListFilesResp,
+  PyenvInfo,
   LoginResp,
   ManagedService,
   ReachabilityResp,
   ServersResp,
   ServiceInput,
+  SetupLog,
   StreamSettings,
+  SystemStats,
   WallpapersResp,
 } from '@/types'
 
@@ -72,12 +78,24 @@ function bearerJson<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 // --- Auth (no token) -------------------------------------------------------
-export function login(password: string): Promise<LoginResp> {
-  return fetch('/api/auth/login', {
+export async function login(password: string): Promise<LoginResp> {
+  const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
-  }).then((r) => parse<LoginResp>(r))
+  })
+  if (res.ok) return (await res.json()) as LoginResp
+  // Surface the server's message (wrong password / brute-force block) verbatim,
+  // and do NOT run parse()'s global 401 → onUnauthorized routing: a failed login
+  // is expected here and we're already on the login screen.
+  let detail = res.statusText
+  try {
+    const body = await res.json()
+    detail = body.detail || body.message || detail
+  } catch {
+    /* non-JSON error body */
+  }
+  throw new ApiError(res.status, detail)
 }
 
 export function logout(): Promise<{ success: boolean }> {
@@ -90,6 +108,7 @@ export function logout(): Promise<{ success: boolean }> {
 
 // --- Device / settings (Bearer) -------------------------------------------
 export const getInfo = () => bearerJson<DeviceInfo>('GET', '/api/info')
+export const getStats = () => bearerJson<SystemStats>('GET', '/api/stats')
 export const setStream = (s: Partial<StreamSettings>) =>
   bearerJson<{ success: boolean } & StreamSettings>('POST', '/api/settings/stream', s)
 export const setPassword = (password: string) =>
@@ -105,6 +124,10 @@ export const mkdir = (path: string) =>
   bearerJson<{ success: boolean; path: string }>('POST', '/api/files/mkdir', { path })
 export const deleteFile = (path: string) =>
   bearerJson<{ success: boolean }>('DELETE', '/api/files/delete', { path })
+export const renameFile = (path: string, name: string) =>
+  bearerJson<{ success: boolean; path: string; name: string }>('POST', '/api/files/rename', { path, name })
+export const zipFile = (path: string) =>
+  bearerJson<{ success: boolean; path: string; name: string }>('POST', '/api/files/zip', { path })
 
 /** Build an authenticated download URL (token in query — usable as <a href download>). */
 export function downloadUrl(path: string): string {
@@ -191,6 +214,16 @@ export const suggestPort = (cwd: string, entry: string) =>
     'GET',
     `/api/servers/suggest-port?cwd=${encodeURIComponent(cwd)}&entry=${encodeURIComponent(entry)}`,
   )
+export const pyenvInfo = () => bearerJson<PyenvInfo>('GET', '/api/servers/pyenv')
+export const createPyenvVenv = (base: string, name: string) =>
+  bearerJson<{ ok: boolean; name: string; path: string; label: string }>('POST', '/api/servers/pyenv', {
+    base,
+    name,
+  })
+export const setupEnv = (id: string, base_python: string) =>
+  bearerJson<{ started: boolean }>('POST', `/api/servers/${id}/setup-env`, { base_python })
+export const getSetupLog = (id: string) =>
+  bearerJson<SetupLog>('GET', `/api/servers/${id}/setup-env/log`)
 export const setServersBaseDir = (path: string) =>
   bearerJson<{ base_dir: string }>('POST', '/api/servers/base-dir', { path })
 export const createServer = (s: ServiceInput) =>
@@ -205,6 +238,8 @@ export const stopServer = (id: string) =>
   bearerJson<ManagedService>('POST', `/api/servers/${id}/stop`)
 export const restartServer = (id: string) =>
   bearerJson<ManagedService>('POST', `/api/servers/${id}/restart`)
+export const gitPull = (id: string) =>
+  bearerJson<GitPullResp>('POST', `/api/servers/${id}/git-pull`)
 export const serverLogs = (id: string, lines = 300) =>
   bearerJson<{ logs: string }>('GET', `/api/servers/${id}/logs?lines=${lines}`)
 
@@ -222,3 +257,28 @@ export const deployService = (
 )
 export const getDeployLog = (id: string) =>
   bearerJson<DeployLog>('GET', `/api/servers/${id}/deploy/log`)
+
+// --- Client Project (CRM; all Bearer) --------------------------------------
+function cpQs(filters?: Record<string, string>): string {
+  const e = Object.entries(filters ?? {}).filter(([, v]) => v != null && v !== '')
+  return e.length ? '?' + e.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&') : ''
+}
+export const cpList = (entity: string, filters?: Record<string, string>) =>
+  bearerJson<{ items: CpRecord[] }>('GET', `/api/cp/${entity}${cpQs(filters)}`)
+export const cpCreate = (entity: string, data: CpRecord) =>
+  bearerJson<CpRecord>('POST', `/api/cp/${entity}`, data)
+export const cpUpdate = (entity: string, id: string, data: CpRecord) =>
+  bearerJson<CpRecord>('PUT', `/api/cp/${entity}/${id}`, data)
+export const cpDelete = (entity: string, id: string) =>
+  bearerJson<{ success: boolean }>('DELETE', `/api/cp/${entity}/${id}`)
+export const cpDashboard = () => bearerJson<CpDashboard>('GET', '/api/cp/dashboard')
+export function cpUpload(
+  file: File,
+  meta: { project_id?: string; client_id?: string; issue_id?: string; category?: string },
+): Promise<CpRecord> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('token', _token ?? '')
+  for (const [k, v] of Object.entries(meta)) if (v) fd.append(k, v)
+  return fetch('/api/cp/upload', { method: 'POST', body: fd }).then((r) => parse<CpRecord>(r))
+}

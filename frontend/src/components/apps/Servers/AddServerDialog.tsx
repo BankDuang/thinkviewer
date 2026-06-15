@@ -4,6 +4,7 @@ import type {
   DiscoveredFolder,
   Interpreter,
   ManagedService,
+  PyenvInfo,
   ServiceInput,
 } from '@/types'
 import * as api from '@/lib/restClient'
@@ -76,6 +77,13 @@ export function AddServerDialog({ mode, service, onClose, onSaved }: AddServerDi
   const [interpLoading, setInterpLoading] = useState(false)
   const [python, setPython] = useState(service?.python ?? '')
   const [pythonMode, setPythonMode] = useState<'select' | 'custom'>('select')
+
+  // Create-a-pyenv-virtualenv panel
+  const [pyenvOpen, setPyenvOpen] = useState(false)
+  const [pyenvInfo, setPyenvInfo] = useState<PyenvInfo | null>(null)
+  const [pyenvBase, setPyenvBase] = useState('')
+  const [pyenvName, setPyenvName] = useState('')
+  const [pyenvBusy, setPyenvBusy] = useState(false)
 
   const [saving, setSaving] = useState(false)
 
@@ -177,6 +185,41 @@ export function AddServerDialog({ mode, service, onClose, onSaved }: AddServerDi
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, saving])
+
+  async function openPyenv() {
+    setPyenvOpen(true)
+    if (pyenvInfo) return
+    try {
+      const info = await api.pyenvInfo()
+      setPyenvInfo(info)
+      setPyenvBase(info.versions[0] ?? '')
+    } catch {
+      setPyenvInfo({ installed: false, has_virtualenv: false, versions: [] })
+    }
+  }
+
+  async function createPyenv() {
+    const nm = pyenvName.trim()
+    if (!nm || !pyenvBase || pyenvBusy) return
+    setPyenvBusy(true)
+    try {
+      const res = await api.createPyenvVenv(pyenvBase, nm)
+      // Re-list interpreters (the new env now appears) and select it to run with.
+      const { interpreters: list } = await api.serverInterpreters(effectiveCwd)
+      setInterpreters(list)
+      const match =
+        list.find((i) => i.path === res.path) ?? list.find((i) => i.label.includes(res.name))
+      setPython(match ? match.path : res.path)
+      setPythonMode(match ? 'select' : 'custom')
+      setPyenvOpen(false)
+      setPyenvName('')
+      notify('ok', `Created ${res.label}`)
+    } catch (e) {
+      notify('error', e instanceof api.ApiError ? e.message : 'Could not create the virtualenv')
+    } finally {
+      setPyenvBusy(false)
+    }
+  }
 
   function pickFolder(folder: DiscoveredFolder) {
     setCwd(folder.path)
@@ -433,6 +476,72 @@ export function AddServerDialog({ mode, service, onClose, onSaved }: AddServerDi
                     })}
                     <option value={CUSTOM}>Custom path…</option>
                   </select>
+                )}
+
+                {/* Create a pyenv virtualenv inline, then run with it */}
+                {!interpLoading && pythonMode === 'select' && (
+                  <div className="srv-pyenv">
+                    {!pyenvOpen ? (
+                      <button className="srv-link-btn" onClick={() => void openPyenv()}>
+                        <Icon name="plus" size={12} /> New pyenv virtualenv
+                      </button>
+                    ) : !pyenvInfo ? (
+                      <div className="srv-readonly">
+                        <Icon name="refresh" size={13} className="spin" /> Checking pyenv…
+                      </div>
+                    ) : !pyenvInfo.installed ? (
+                      <div className="srv-deploy-hint">pyenv is not installed on this machine.</div>
+                    ) : !pyenvInfo.has_virtualenv ? (
+                      <div className="srv-deploy-hint">
+                        Install the plugin first: <code>brew install pyenv-virtualenv</code>
+                      </div>
+                    ) : pyenvInfo.versions.length === 0 ? (
+                      <div className="srv-deploy-hint">
+                        No pyenv base versions installed — e.g. <code>pyenv install 3.12.3</code>
+                      </div>
+                    ) : (
+                      <div className="srv-pyenv-form">
+                        <select
+                          className="tv-field srv-select"
+                          value={pyenvBase}
+                          disabled={pyenvBusy}
+                          onChange={(e) => setPyenvBase(e.target.value)}
+                          title="Base Python version"
+                        >
+                          {pyenvInfo.versions.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          className="tv-field srv-input"
+                          value={pyenvName}
+                          spellCheck={false}
+                          autoCapitalize="none"
+                          placeholder="env name (e.g. odentto)"
+                          disabled={pyenvBusy}
+                          onChange={(e) => setPyenvName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && void createPyenv()}
+                        />
+                        <button
+                          className="tv-btn tv-btn--primary"
+                          onClick={() => void createPyenv()}
+                          disabled={pyenvBusy || !pyenvName.trim()}
+                        >
+                          {pyenvBusy ? (
+                            <Icon name="refresh" size={13} className="spin" />
+                          ) : (
+                            <Icon name="plus" size={13} />
+                          )}
+                          Create
+                        </button>
+                        <button className="srv-link-btn" onClick={() => setPyenvOpen(false)} disabled={pyenvBusy}>
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 

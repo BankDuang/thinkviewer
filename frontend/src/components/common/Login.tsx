@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useSessionStore } from '@/store/sessionStore'
+import { ApiError } from '@/lib/restClient'
 import { Icon } from './Icon'
 import './login.css'
 
@@ -19,8 +20,9 @@ export function Login() {
     setError('')
     try {
       await login(password)
-    } catch {
-      setError('Incorrect password')
+    } catch (e) {
+      // Surface the server's message (e.g. the brute-force block notice).
+      setError(e instanceof ApiError ? e.message : 'Incorrect password')
       setShake(true)
       setPassword('')
       setTimeout(() => setShake(false), 450)

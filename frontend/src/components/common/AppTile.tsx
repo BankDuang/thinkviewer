@@ -67,6 +67,17 @@ const TILES: Record<AppKind, TileDef> = {
       </g>
     ),
   },
+  clientproject: {
+    from: '#b07cff',
+    to: '#6d28d9',
+    glyph: (
+      <g fill="none" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="14" y="22" width="28" height="19" rx="3" />
+        <path d="M22 22v-3a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v3M14 31h28" />
+        <circle cx="28" cy="31" r="1.6" fill="#fff" stroke="none" />
+      </g>
+    ),
+  },
 }
 
 export function AppTile({ app, size = 56 }: { app: AppKind; size?: number | string }) {

@@ -217,6 +217,17 @@
   white-space: nowrap;
   max-width: 200px;
 }
+.srv-venv-chip {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tl-max);
+  background: color-mix(in srgb, var(--tl-max) 16%, transparent);
+}
 .srv-port-link {
   display: inline-flex;
   align-items: center;
@@ -466,6 +477,24 @@
 }
 .srv-custom-row .srv-input {
   flex: 1 1 auto;
+}
+
+/* ---------------- pyenv virtualenv creator ---------------- */
+.srv-pyenv {
+  margin-top: 7px;
+}
+.srv-pyenv-form {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.srv-pyenv-form .srv-select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.srv-pyenv-form .srv-input {
+  flex: 1 1 140px;
 }
 
 /* ---------------- Folder picker ---------------- */

@@ -5,7 +5,7 @@ import clsx from 'clsx'
 import type { AppProps, FileEntry } from '@/types'
 import * as api from '@/lib/restClient'
 import { notify } from '@/store/notificationStore'
-import { confirmDialog } from '@/store/dialogStore'
+import { confirmDialog, promptDialog } from '@/store/dialogStore'
 import { formatBytes } from '@/lib/format'
 import { Icon } from '@/components/common/Icon'
 import { Breadcrumb } from './Breadcrumb'
@@ -202,6 +202,45 @@ export function FilesApp({ focused }: AppProps) {
       }
     },
     [selected, loadPath],
+  )
+
+  const renameEntry = useCallback(
+    async (entry: FileEntry) => {
+      setMenu(null)
+      const next = await promptDialog({
+        title: `Rename “${entry.name}”`,
+        confirmLabel: 'Rename',
+        defaultValue: entry.name,
+        placeholder: 'New name',
+      })
+      if (next == null) return // cancelled
+      const name = next.trim()
+      if (!name || name === entry.name) return
+      try {
+        const res = await api.renameFile(entry.path, name)
+        notify('ok', `Renamed to “${res.name}”`)
+        setSelected(res.path)
+        void loadPath(pathRef.current, 'none')
+      } catch (e) {
+        notify('error', e instanceof api.ApiError ? e.message : 'Could not rename')
+      }
+    },
+    [loadPath],
+  )
+
+  const zipEntry = useCallback(
+    async (entry: FileEntry) => {
+      setMenu(null)
+      notify('info', `Compressing “${entry.name}”…`)
+      try {
+        const res = await api.zipFile(entry.path)
+        notify('ok', `Created “${res.name}”`)
+        void loadPath(pathRef.current, 'none')
+      } catch (e) {
+        notify('error', e instanceof api.ApiError ? e.message : 'Could not create the zip')
+      }
+    },
+    [loadPath],
   )
 
   // --- new folder -----------------------------------------------------------
@@ -643,6 +682,22 @@ export function FilesApp({ focused }: AppProps) {
               Download
             </button>
           )}
+          <button
+            className="fm-menu-item"
+            onClick={() => void renameEntry(menu.entry)}
+            disabled={!!menu.entry.error}
+          >
+            <Icon name="pencil" size={15} />
+            Rename
+          </button>
+          <button
+            className="fm-menu-item"
+            onClick={() => void zipEntry(menu.entry)}
+            disabled={!!menu.entry.error}
+          >
+            <Icon name="archive" size={15} />
+            Compress to .zip
+          </button>
           <div className="fm-menu-sep" />
           <button className="fm-menu-item is-danger" onClick={() => void deleteEntry(menu.entry)}>
             <Icon name="trash" size={15} />

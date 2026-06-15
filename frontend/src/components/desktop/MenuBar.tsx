@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '@/components/common/Icon'
+import { MenuBarStats } from './MenuBarStats'
 import { useWindowStore } from '@/store/windowStore'
 import { useConnectionStore } from '@/store/connectionStore'
 import { useSessionStore } from '@/store/sessionStore'
@@ -51,6 +52,7 @@ export function MenuBar() {
       </div>
 
       <div className="menubar-right">
+        <MenuBarStats />
         <div className="menubar-status" title={STATUS_LABEL[status]}>
           <span className="menubar-dot" style={{ background: STATUS_COLOR[status], color: STATUS_COLOR[status] }} />
           <Icon name="signal" size={15} />

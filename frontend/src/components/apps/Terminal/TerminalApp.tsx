@@ -21,6 +21,7 @@ export function TerminalApp({ focused }: AppProps) {
   const sessions = useTerminalStore((s) => s.sessions)
   const activeId = useTerminalStore((s) => s.activeId)
   const setActive = useTerminalStore((s) => s.setActive)
+  const pendingOpen = useTerminalStore((s) => s.pendingOpen)
   const status = useConnectionStore((s) => s.status)
 
   const [preview, setPreview] = useState<PastePreview | null>(null)
@@ -37,6 +38,29 @@ export function TerminalApp({ focused }: AppProps) {
     setPreview(null)
   }, [])
 
+  // ── Open-in-project intent (from the Servers app): focus the tab named after
+  //    the project if one exists, else create a tab already cd'd into its dir.
+  //    Declared before the bootstrap effect and claims the bootstrap latch so a
+  //    project open on a fresh Terminal doesn't also spawn a blank tab. ──
+  useEffect(() => {
+    // Read the LIVE intent (not the closure) so StrictMode's setup→cleanup→setup
+    // can't act twice: after consumeOpen() the store is null and the rerun bails.
+    const pend = useTerminalStore.getState().pendingOpen
+    if (!pend) return
+    // Claim the bootstrap latch the moment a project open is pending — even if we
+    // must defer the create until the socket connects — so the bootstrap effect
+    // never also spawns a blank tab.
+    bootstrapped = true
+    if (status !== 'open') return // wait for the socket; re-runs when status flips
+    const { sessions: ss, order: ord, setActive: select, consumeOpen } =
+      useTerminalStore.getState()
+    const want = pend.name.trim()
+    const existing = ord.find((id) => (ss[id]?.name ?? '').trim() === want)
+    if (existing) select(existing)
+    else ws.send({ type: 'term_create', cwd: pend.cwd, name: pend.name })
+    consumeOpen()
+  }, [pendingOpen, status])
+
   // ── Bootstrap: refresh the shared list and create one terminal if empty ──
   useEffect(() => {
     ws.send({ type: 'term_list' })
@@ -47,7 +71,9 @@ export function TerminalApp({ focused }: AppProps) {
         done = true
         bootstrapped = true
         off()
-        if (m.sessions.length === 0) ws.send({ type: 'term_create' })
+        // A pending project-open will create its own tab — don't also auto-spawn.
+        if (m.sessions.length === 0 && !useTerminalStore.getState().pendingOpen)
+          ws.send({ type: 'term_create' })
       }
     })
     return () => {

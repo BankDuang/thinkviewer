@@ -20,7 +20,7 @@ export type ClientMsg =
   | { type: 'key_combo'; keys: string[] }
   | { type: 'type_text'; text: string }
   | { type: 'release_modifiers' }
-  | { type: 'term_create' }
+  | { type: 'term_create'; cwd?: string; name?: string }
   | { type: 'term_input'; session_id: string; data: string } // base64 (UTF-8 safe)
   | { type: 'term_resize'; session_id: string; rows: number; cols: number }
   | { type: 'term_close'; session_id: string }
@@ -38,7 +38,7 @@ export interface TermSessionMeta {
 export type ServerMsg =
   | { type: 'auth_ok'; screen_width: number; screen_height: number }
   | { type: 'error'; message: string }
-  | { type: 'term_created'; session_id: string; buffer: string }
+  | { type: 'term_created'; session_id: string; name: string; buffer: string }
   | { type: 'term_output'; session_id: string; data: string } // base64
   | { type: 'term_closed'; session_id: string }
   | { type: 'term_list'; sessions: TermSessionMeta[] }

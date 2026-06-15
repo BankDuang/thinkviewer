@@ -35,6 +35,13 @@ export interface StreamSettings {
   scale: number
 }
 
+export interface SystemStats {
+  cpu: number | null // 0..100
+  mem_used: number | null // bytes
+  mem_total: number | null // bytes
+  mem_percent: number | null // 0..100
+}
+
 export interface LoginResp {
   success: boolean
   token: string
@@ -62,6 +69,7 @@ export interface ManagedService {
   id: string
   name: string
   cwd: string
+  root: string // project top-level dir (cwd may be a subfolder like <root>/server)
   entry: string
   python: string
   port: number | null
@@ -84,6 +92,15 @@ export interface ServersResp {
   services: ManagedService[]
 }
 
+export interface GitPullResp {
+  ok: boolean
+  code: number
+  output: string
+  restarted: boolean
+  restart_error: string | null
+  service: ManagedService
+}
+
 export interface DiscoveredFolder {
   name: string
   path: string
@@ -101,6 +118,12 @@ export interface Interpreter {
   label: string
   path: string
   kind: 'venv' | 'pyenv' | 'system'
+}
+
+export interface PyenvInfo {
+  installed: boolean
+  has_virtualenv: boolean
+  versions: string[] // installed base versions (excludes virtualenvs)
 }
 
 export interface ServiceInput {
@@ -134,4 +157,32 @@ export interface DeployLog {
   exit: number | null
   domain: string | null
   log: string
+}
+
+export interface SetupLog {
+  running: boolean
+  success: boolean | null
+  venv_python: string | null
+  log: string
+}
+
+// --- Client Project (CRM) — generic records keyed by the entity's columns ---
+export type CpRecord = Record<string, any>
+
+export interface CpDashboard {
+  clients_total: number
+  clients_active: number
+  projects_total: number
+  projects_active: number
+  projects_delivered: number
+  issues_open: number
+  issues_critical: number
+  tasks_open: number
+  tasks_overdue: number
+  cr_open: number
+  total_budget: number
+  outstanding: number
+  deadlines: CpRecord[]
+  critical_issues: CpRecord[]
+  recent_activity: CpRecord[]
 }

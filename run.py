@@ -23,6 +23,7 @@ import pty
 import select
 import socket
 import glob
+import zipfile
 import struct
 import fcntl
 import termios
@@ -103,6 +104,42 @@ DEFAULT_SERVERS_DIR = os.path.realpath(
 SERVER_LOG_DIR = os.path.join(BASE_DIR, "server_logs")
 ENTRY_CANDIDATES = ("run.py", "main.py", "app.py", "server.py", "wsgi.py", "asgi.py")
 
+# ---- Client Project (CRM + project tracking) "app" --------------------------
+CP_FILES_DIR = os.path.join(BASE_DIR, "client_project_files")
+# entity -> extra columns (besides id/created_at/updated_at). All stored as TEXT
+# (SQLite is dynamically typed); generic CRUD drives every table from this map.
+CP_ENTITIES = {
+    "clients": ["name", "company", "contact_name", "contact_email", "contact_phone",
+                "channels", "status", "value", "notes"],
+    "projects": ["client_id", "name", "server_service", "owner", "start_date",
+                 "deliver_date", "budget", "scope", "tech_stack", "domain", "server",
+                 "repository", "status", "notes"],
+    "phases": ["project_id", "name", "status", "owner", "pending", "waiting_client",
+               "order_idx", "notes"],
+    "tasks": ["project_id", "phase_id", "title", "description", "assignee", "status",
+              "priority", "due_date"],
+    "issues": ["project_id", "title", "description", "severity", "status", "assignee",
+               "resolution", "fixed_date", "client_confirmed", "attachments"],
+    "change_requests": ["project_id", "title", "description", "impact_scope",
+                        "impact_timeline", "impact_budget", "man_days", "status",
+                        "approved_by", "approved_date"],
+    "meeting_notes": ["project_id", "client_id", "title", "date", "attendees",
+                      "summary", "decisions", "action_items", "waiting_client"],
+    "requirements": ["project_id", "feature", "description", "priority", "status",
+                     "in_scope", "wireframe", "conditions", "checklist"],
+    "payments": ["client_id", "project_id", "title", "invoice_no", "amount",
+                 "due_date", "paid", "paid_date", "installment", "notes"],
+    "activity": ["project_id", "client_id", "kind", "message"],
+    "files": ["project_id", "client_id", "issue_id", "name", "path", "category", "notes"],
+}
+# columns whose values are JSON (encoded on write, decoded on read).
+CP_JSON = {
+    "clients": {"channels"},
+    "issues": {"attachments"},
+    "meeting_notes": {"action_items"},
+    "requirements": {"checklist"},
+}
+
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
 
@@ -165,9 +202,10 @@ def keep_awake_stop():
 # PTY Terminal Sessions
 # ============================================================
 class TerminalSession:
-    def __init__(self, session_id: str, loop: asyncio.AbstractEventLoop):
+    def __init__(self, session_id: str, loop: asyncio.AbstractEventLoop,
+                 cwd: str | None = None, name: str = ""):
         self.session_id = session_id
-        self.name: str = ""
+        self.name: str = name
         self.loop = loop
         self.subscribers: set = set()  # WebSocket clients
         self.alive = True
@@ -198,6 +236,11 @@ class TerminalSession:
             os.dup2(slave_fd, 2)
             if slave_fd > 2:
                 os.close(slave_fd)
+            if cwd:  # open directly in the project dir (Servers "Open in Terminal")
+                try:
+                    os.chdir(cwd)
+                except OSError:
+                    pass
             os.execvpe(shell, [shell, "-l"], env)
         else:
             # Parent process
@@ -285,10 +328,11 @@ class TerminalManager:
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
 
-    def create(self, session_id: str | None = None) -> TerminalSession:
+    def create(self, session_id: str | None = None, cwd: str | None = None,
+               name: str = "") -> TerminalSession:
         if session_id is None:
             session_id = str(uuid.uuid4())[:8]
-        session = TerminalSession(session_id, self.loop)
+        session = TerminalSession(session_id, self.loop, cwd=cwd, name=name)
         self.sessions[session_id] = session
         # Start broadcast task
         task = asyncio.create_task(self._broadcast_loop(session))
@@ -384,6 +428,9 @@ def init_db():
         action TEXT,
         timestamp TEXT DEFAULT (datetime('now'))
     )""")
+    # Speeds the per-IP failed-login count run on every login attempt.
+    c.execute("CREATE INDEX IF NOT EXISTS idx_conn_log_ip_action_ts "
+              "ON connection_log (ip_address, action, timestamp)")
 
     # Managed services for the "Servers" process-manager app
     c.execute("""CREATE TABLE IF NOT EXISTS services (
@@ -404,6 +451,16 @@ def init_db():
     for _col, _decl in (("domain", "TEXT"), ("email", "TEXT"), ("https", "INTEGER")):
         if _col not in _scols:
             c.execute(f"ALTER TABLE services ADD COLUMN {_col} {_decl}")
+
+    # Client Project (CRM) tables — generic, driven by CP_ENTITIES.
+    for _ent, _cols in CP_ENTITIES.items():
+        _defs = ", ".join(f"{_c} TEXT" for _c in _cols)
+        c.execute(f"CREATE TABLE IF NOT EXISTS cp_{_ent} "
+                  f"(id TEXT PRIMARY KEY, {_defs}, created_at TEXT, updated_at TEXT)")
+        _have = {r[1] for r in c.execute(f"PRAGMA table_info(cp_{_ent})").fetchall()}
+        for _c in _cols:  # forward-compatible column adds
+            if _c not in _have:
+                c.execute(f"ALTER TABLE cp_{_ent} ADD COLUMN {_c} TEXT")
 
     conn.commit()
 
@@ -478,6 +535,40 @@ def create_session(ip_address=""):
     conn.commit()
     conn.close()
     return token
+
+
+# --- Login brute-force protection (per-IP, derived from connection_log) ------
+LOGIN_MAX_FAILS = 5        # wrong-password attempts allowed per IP ...
+LOGIN_BAN_WINDOW_MIN = 60  # ... within this window; also ~how long the block lasts
+_TRUSTED_PROXIES = {"127.0.0.1", "::1"}  # our deploy-kit nginx runs on this host
+_login_lock = asyncio.Lock()             # serialize attempts so the cap is race-free
+
+
+def _client_ip(request: "Request") -> str:
+    """Real client IP. Proxy headers (X-Real-IP / X-Forwarded-For) are honored
+    ONLY when the request arrived from our local nginx (a loopback peer) — a direct
+    connection (e.g. THINKVIEWER_BIND=0.0.0.0) must not be able to forge them to
+    evade the ban or to frame/lock-out a victim IP."""
+    peer = request.client.host if request.client else ""
+    if peer in _TRUSTED_PROXIES:
+        xri = (request.headers.get("x-real-ip") or "").strip()
+        if xri:
+            return xri
+        xff = (request.headers.get("x-forwarded-for") or "").strip()
+        if xff:
+            return xff.split(",")[-1].strip()  # last hop = added by our nginx
+    return peer or "unknown"
+
+
+def _recent_login_fails(ip: str) -> int:
+    """Failed login attempts from this IP within the ban window."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM connection_log WHERE ip_address=? AND action='login_fail' "
+        "AND timestamp >= datetime('now', ?)",
+        (ip, f"-{LOGIN_BAN_WINDOW_MIN} minutes")).fetchone()
+    conn.close()
+    return int(row[0]) if row else 0
 
 
 def verify_token(token):
@@ -686,6 +777,7 @@ class ServerManager:
     def __init__(self):
         self._procs: dict[str, tuple] = {}  # id -> (Popen, logfile)
         self._deploys: dict[str, dict] = {}  # id -> deploy state
+        self._setups: dict[str, dict] = {}  # id -> env-setup state
 
     # ---- base dir (persisted, configurable) ----
     def base_dir(self) -> str:
@@ -695,6 +787,21 @@ class ServerManager:
         path = os.path.realpath(os.path.expanduser(path or DEFAULT_SERVERS_DIR))
         set_setting("server_base_dir", path)
         return path
+
+    def _project_root(self, cwd) -> str:
+        """The project's top-level folder. The run dir is often a subfolder
+        (<project>/server, <project>/webapp), so the root is the first path
+        segment under the servers base dir; falls back to cwd for services that
+        live outside the base dir."""
+        cwd = os.path.realpath(os.path.expanduser(cwd or ""))
+        base = os.path.realpath(self.base_dir())
+        try:
+            rel = os.path.relpath(cwd, base)
+        except ValueError:  # different drives — can't relativize
+            return cwd
+        if rel == "." or rel.startswith(".."):
+            return cwd
+        return os.path.join(base, rel.split(os.sep)[0])
 
     # ---- persistence ----
     @staticmethod
@@ -754,6 +861,7 @@ class ServerManager:
             "uptime": uptime,
             "exit_code": exit_code,
             "log_exists": os.path.isfile(self._log_path(d["id"])),
+            "root": self._project_root(d["cwd"]),
         }
 
     def list(self) -> list[dict]:
@@ -907,6 +1015,62 @@ class ServerManager:
             data = f.read()
         return "\n".join(data.decode("utf-8", "replace").splitlines()[-lines:])
 
+    # ---- git ----
+    def git_pull(self, sid) -> dict:
+        """`git pull --ff-only` in the service's cwd; auto-restart if it was running."""
+        row = self._get_row(sid)
+        if not row:
+            raise KeyError(sid)
+        d = self._row(row)
+        cwd = os.path.realpath(os.path.expanduser(d["cwd"]))
+        if not os.path.isdir(cwd):
+            raise ValueError("Working directory not found")
+        # GIT_TERMINAL_PROMPT=0 so a private repo without cached creds fails fast
+        # instead of hanging on an invisible credential prompt.
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": ""}
+        # The service cwd is often a SUBDIRECTORY of the repo (e.g. <repo>/server),
+        # so ask git — which walks up to the repo root — instead of looking for a
+        # literal .git inside cwd.
+        try:
+            probe = subprocess.run(["git", "-C", cwd, "rev-parse", "--is-inside-work-tree"],
+                                   capture_output=True, text=True, timeout=10, env=env,
+                                   stdin=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise ValueError("git is not installed or not on PATH")
+        except subprocess.TimeoutExpired:
+            raise ValueError("git repository check timed out")
+        if probe.returncode != 0 or probe.stdout.strip() != "true":
+            raise ValueError("Not a git repository (no .git in the working directory or its parents)")
+        was_running = self._running(sid, d["pid"])
+        try:
+            r = subprocess.run(["git", "-C", cwd, "pull", "--ff-only"], env=env,
+                               capture_output=True, text=True, timeout=120,
+                               stdin=subprocess.DEVNULL)
+            output = ((r.stdout or "") + (r.stderr or "")).strip()
+            code = r.returncode
+        except subprocess.TimeoutExpired:
+            output, code = "git pull timed out after 120s", -1
+        ok = code == 0
+        # Append the full git output to the service log so "View logs" can recover
+        # it — the UI toast only shows a one-line summary.
+        try:
+            os.makedirs(SERVER_LOG_DIR, exist_ok=True)
+            with open(self._log_path(sid), "ab", buffering=0) as lf:
+                lf.write((f"\n===== [thinkviewer] git pull {datetime.now().isoformat()} "
+                          f"(exit {code}) =====\n{output}\n").encode())
+        except Exception:
+            pass
+        restarted, restart_error = False, None
+        if ok and was_running:
+            try:
+                self.restart(sid)
+                restarted = True
+            except Exception as e:
+                restart_error = str(e)
+                output += f"\n[thinkviewer] pulled OK but restart failed: {e}"
+        return {"ok": ok, "code": code, "output": output, "restarted": restarted,
+                "restart_error": restart_error, "service": self.get(sid)}
+
     def reconcile(self):
         """On boot: clear persisted PIDs whose process is no longer alive."""
         conn = get_db()
@@ -991,6 +1155,105 @@ class ServerManager:
             port += 1
         return port
 
+    # ---- environment setup (create a .venv + install requirements) ----
+    def _setup_log_path(self, sid) -> str:
+        return os.path.join(SERVER_LOG_DIR, f"setup-{sid}.log")
+
+    def setup_env(self, sid, base_python="") -> dict:
+        row = self._get_row(sid)
+        if not row:
+            raise KeyError(sid)
+        d = self._row(row)
+        cwd = os.path.realpath(os.path.expanduser(d["cwd"]))
+        if not os.path.isdir(cwd):
+            raise ValueError("Working directory not found")
+        base = base_python or sys.executable
+        base = base if (os.path.isabs(base) and os.path.isfile(base)) else (shutil.which(base) or "")
+        if not base:
+            raise ValueError("Base Python interpreter not found")
+        st = self._setups.get(sid)
+        if st and st.get("running"):
+            raise ValueError("Environment setup is already running")
+        os.makedirs(SERVER_LOG_DIR, exist_ok=True)
+        with open(self._setup_log_path(sid), "w") as f:
+            f.write(f"== create .venv in {cwd}\n== base python: {base}\n\n")
+        self._setups[sid] = {
+            "running": True, "success": None,
+            "started_at": datetime.now().isoformat(), "venv_python": None,
+        }
+        threading.Thread(target=self._run_setup, args=(sid, cwd, base), daemon=True).start()
+        return {"started": True}
+
+    def _run_setup(self, sid, cwd, base):
+        log = self._setup_log_path(sid)
+        venv_dir = os.path.join(cwd, ".venv")
+        venv_py = os.path.join(venv_dir, "bin", "python")
+        ok = False
+        try:
+            with open(log, "a", buffering=1) as f:
+                def run(cmd, label):
+                    f.write(f"\n$ {label}\n")
+                    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE,
+                                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+                    for line in proc.stdout:  # stream live to the log
+                        f.write(line)
+                    proc.wait()
+                    return proc.returncode
+
+                if os.path.isdir(venv_dir):  # recreate cleanly (handles broken venv)
+                    shutil.rmtree(venv_dir, ignore_errors=True)
+                if run([base, "-m", "venv", venv_dir],
+                       f"{os.path.basename(base)} -m venv .venv") != 0 or not os.path.isfile(venv_py):
+                    f.write("\n[error] could not create the virtual environment\n")
+                    raise RuntimeError("venv")
+                run([venv_py, "-m", "pip", "install", "--upgrade", "pip", "wheel"],
+                    "pip install --upgrade pip wheel")
+                req = os.path.join(cwd, "requirements.txt")
+                if os.path.isfile(req):
+                    if run([venv_py, "-m", "pip", "install", "-r", "requirements.txt"],
+                           "pip install -r requirements.txt") != 0:
+                        f.write("\n[error] pip install failed\n")
+                        raise RuntimeError("pip")
+                elif os.path.isfile(os.path.join(cwd, "pyproject.toml")):
+                    if run([venv_py, "-m", "pip", "install", "."], "pip install .") != 0:
+                        f.write("\n[error] pip install . failed\n")
+                        raise RuntimeError("pip")
+                else:
+                    f.write("\n[warn] no requirements.txt / pyproject.toml — empty venv created\n")
+                ok = True
+                f.write("\n== DONE — environment ready ==\n")
+        except Exception as e:
+            try:
+                with open(log, "a") as f:
+                    f.write(f"\n[error] {e}\n== FAILED ==\n")
+            except Exception:
+                pass
+        if ok:  # point the service at the freshly built interpreter
+            conn = get_db()
+            conn.execute("UPDATE services SET python=? WHERE id=?", (venv_py, sid))
+            conn.commit()
+            conn.close()
+        st = self._setups.get(sid, {})
+        st.update({"running": False, "success": ok, "venv_python": venv_py if ok else None})
+        self._setups[sid] = st
+
+    def setup_log(self, sid) -> dict:
+        log = self._setup_log_path(sid)
+        text = ""
+        if os.path.isfile(log):
+            with open(log, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 131072))
+                text = f.read().decode("utf-8", "replace")
+        st = self._setups.get(sid, {})
+        return {
+            "running": bool(st.get("running")),
+            "success": st.get("success"),
+            "venv_python": st.get("venv_python"),
+            "log": text,
+        }
+
     def interpreters(self, cwd="") -> list[dict]:
         out, seen = [], set()
 
@@ -1012,10 +1275,14 @@ class ServerManager:
             try:
                 root = subprocess.run(["pyenv", "root"], capture_output=True, text=True,
                                       timeout=5).stdout.strip()
-                vers = subprocess.run(["pyenv", "versions", "--bare"], capture_output=True,
-                                      text=True, timeout=5).stdout.split()
+                venvs = set(subprocess.run(
+                    ["pyenv", "virtualenvs", "--bare", "--skip-aliases"],
+                    capture_output=True, text=True, timeout=5).stdout.split())
+                vers = subprocess.run(["pyenv", "versions", "--bare", "--skip-aliases"],
+                                      capture_output=True, text=True, timeout=5).stdout.split()
                 for v in vers:
-                    add(f"pyenv · {v}", os.path.join(root, "versions", v, "bin", "python"), "pyenv")
+                    label = f"pyenv venv · {v}" if v in venvs else f"pyenv · {v}"
+                    add(label, os.path.join(root, "versions", v, "bin", "python"), "pyenv")
             except Exception:
                 pass
         for c in sorted(glob.glob("/opt/homebrew/bin/python3.*")) + [
@@ -1024,6 +1291,79 @@ class ServerManager:
                 add(f"system · {os.path.basename(c)}", c, "system")
         add(f"current · {os.path.basename(sys.executable)}", sys.executable, "system")
         return out
+
+    # ---- pyenv virtualenvs (create a named env to run a service with) ----
+    def _pyenv_lists(self):
+        """(base versions, virtualenv names) from pyenv, or ([], set())."""
+        try:
+            venvs = set(subprocess.run(
+                ["pyenv", "virtualenvs", "--bare", "--skip-aliases"],
+                capture_output=True, text=True, timeout=5).stdout.split())
+            vers = subprocess.run(
+                ["pyenv", "versions", "--bare", "--skip-aliases"],
+                capture_output=True, text=True, timeout=5).stdout.split()
+            return [v for v in vers if v not in venvs], venvs
+        except Exception:
+            return [], set()
+
+    def pyenv_info(self) -> dict:
+        if not shutil.which("pyenv"):
+            return {"installed": False, "has_virtualenv": False, "versions": []}
+        try:
+            cmds = subprocess.run(["pyenv", "commands"], capture_output=True,
+                                  text=True, timeout=5).stdout.split()
+        except Exception:
+            cmds = []
+        base, _ = self._pyenv_lists()
+        return {"installed": True, "has_virtualenv": "virtualenv" in cmds, "versions": base}
+
+    def create_pyenv_virtualenv(self, base, name) -> dict:
+        if not shutil.which("pyenv"):
+            raise ValueError("pyenv is not installed")
+        info = self.pyenv_info()
+        if not info["has_virtualenv"]:
+            raise ValueError("The pyenv-virtualenv plugin isn't installed "
+                             "(brew install pyenv-virtualenv)")
+        name = (name or "").strip()
+        # Strict whitelist — also the value only ever reaches pyenv as an argv
+        # element (never a shell), so this can't inject commands.
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", name):
+            raise ValueError("Invalid name — use letters, numbers, dot, dash or underscore")
+        base = (base or "").strip()
+        if base not in info["versions"]:
+            raise ValueError("Choose an installed pyenv base version")
+        _, venvs = self._pyenv_lists()
+        if name in venvs or name in info["versions"]:
+            raise ValueError(f"A pyenv environment named '{name}' already exists")
+        try:
+            r = subprocess.run(["pyenv", "virtualenv", base, name],
+                               capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            raise ValueError("Creating the virtualenv timed out")
+        if r.returncode != 0:
+            raise ValueError((r.stderr or r.stdout or "pyenv virtualenv failed").strip()[:600])
+        # Return the SAME path interpreters() discovers (pyenv stores the env under
+        # versions/<base>/envs/<name> with a versions/<name> alias symlink) so the
+        # UI can auto-select the new interpreter in the list.
+        path = self._pyenv_venv_path(name)
+        if not path:
+            raise ValueError("Virtualenv created but its python interpreter was not found")
+        return {"ok": True, "name": name, "path": path, "label": f"pyenv venv · {name}"}
+
+    def _pyenv_venv_path(self, name):
+        try:
+            root = subprocess.run(["pyenv", "root"], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except Exception:
+            return None
+        _, venvs = self._pyenv_lists()
+        # prefer the bare entry interpreters() would list (e.g. 3.12.8/envs/<name>),
+        # then the top-level alias.
+        for v in [x for x in venvs if x == name or x.endswith(f"/envs/{name}")] + [name]:
+            p = os.path.join(root, "versions", v, "bin", "python")
+            if os.path.isfile(p):
+                return p
+        return None
 
     # ---- deploy (domain + HTTPS via deploy-kit; needs root → osascript) ----
     def _kit_dir(self) -> str:
@@ -1064,7 +1404,16 @@ class ServerManager:
             return {"output": "Reachability check timed out (the global probe was slow).", "code": -1}
 
     def _deploy_log_path(self, sid) -> str:
+        # Archival copy, written by *this* (normal-user) process into server_logs.
         return os.path.join(SERVER_LOG_DIR, f"deploy-{sid}.log")
+
+    def _deploy_live_log(self, sid) -> str:
+        # Live log the privileged (root) runner appends to. It MUST live outside
+        # ~/Desktop: that tree is TCC-protected, so the root process spawned by
+        # the osascript auth trampoline can't write there ("Operation not
+        # permitted") — which previously surfaced as a bogus "authorization
+        # cancelled or failed" even though the password was entered correctly.
+        return f"/tmp/tv-deploy-{sid}.log"
 
     def deploy(self, sid, domain, email="", staging=False) -> dict:
         row = self._get_row(sid)
@@ -1097,7 +1446,7 @@ class ServerManager:
         shutil.rmtree(tmp_kit, ignore_errors=True)
         shutil.copytree(kit, tmp_kit)
 
-        log = self._deploy_log_path(sid)
+        log = self._deploy_live_log(sid)  # /tmp — root-writable; archived at the end
         with open(log, "w") as f:
             f.write(f"== deploy https://{domain} -> 127.0.0.1:{d['port']}"
                     f"{'  (STAGING)' if staging else ''} ==\n"
@@ -1142,10 +1491,23 @@ class ServerManager:
             if m:
                 exit_code = int(m[-1])
             if osa_failed and _DEPLOY_EXIT_MARK not in text:
+                cancelled = any(s in osa_err for s in
+                                ("-128", "User canceled", "User cancelled"))
+                reason = ("Administrator authorization was cancelled on the host "
+                          "— no password was entered."
+                          if cancelled else
+                          "The administrator command could not be run, so the deploy "
+                          "never started (see the error above).")
                 with open(log, "a") as f:
-                    f.write("\n[thinkviewer] Authorization was cancelled or failed "
-                            f"— deploy did not run.\n{osa_err}\n{_DEPLOY_EXIT_MARK}:1\n")
+                    f.write(f"\n[thinkviewer] {reason}\n{osa_err}\n{_DEPLOY_EXIT_MARK}:1\n")
                 exit_code = 1
+        except Exception:
+            pass
+        # Mirror the live /tmp log into server_logs so it survives /tmp cleanup
+        # and stays readable after a ThinkViewer restart.
+        try:
+            os.makedirs(SERVER_LOG_DIR, exist_ok=True)
+            shutil.copyfile(log, self._deploy_log_path(sid))
         except Exception:
             pass
         if success:
@@ -1162,7 +1524,10 @@ class ServerManager:
             pass
 
     def deploy_log(self, sid) -> dict:
-        log = self._deploy_log_path(sid)
+        # Prefer the live /tmp log while the deploy is in flight (and just after);
+        # fall back to the archived server_logs copy once /tmp has been cleared.
+        live = self._deploy_live_log(sid)
+        log = live if os.path.isfile(live) else self._deploy_log_path(sid)
         text = ""
         if os.path.isfile(log):
             with open(log, "rb") as f:
@@ -1441,20 +1806,46 @@ if os.path.isdir(_dist_assets):
 # ============================================================
 @app.post("/api/auth/login")
 async def login(request: Request):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request")
     password = body.get("password", "")
-    if verify_password(password):
-        ip = request.client.host if request.client else "unknown"
-        token = create_session(ip)
+    ip = _client_ip(request)
+
+    # Serialize attempts so concurrent/pipelined requests can't slip past the cap.
+    async with _login_lock:
+        fails = _recent_login_fails(ip)
+        # Brute-force guard: block the IP once it has too many recent failures.
+        if fails >= LOGIN_MAX_FAILS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many failed attempts — this IP is blocked. "
+                       f"Try again in up to {LOGIN_BAN_WINDOW_MIN} minutes.")
+
+        if verify_password(password):
+            conn = get_db()
+            # A correct password clears this IP's failure streak.
+            conn.execute("DELETE FROM connection_log WHERE ip_address=? AND action='login_fail'", (ip,))
+            conn.execute("INSERT INTO connection_log (ip_address, action) VALUES (?, 'login')", (ip,))
+            conn.commit()
+            conn.close()
+            return {"success": True, "token": create_session(ip)}
+
+        # Wrong password — record the failure. Keep messages generic (no exact
+        # remaining-attempt count) so a brute-forcer can't pace itself precisely.
         conn = get_db()
-        conn.execute(
-            "INSERT INTO connection_log (ip_address, action) VALUES (?, 'login')",
-            (ip,),
-        )
+        conn.execute("INSERT INTO connection_log (ip_address, action) VALUES (?, 'login_fail')", (ip,))
         conn.commit()
         conn.close()
-        return {"success": True, "token": token}
-    raise HTTPException(status_code=401, detail="Invalid password")
+        if fails + 1 >= LOGIN_MAX_FAILS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Too many failed attempts — this IP is now blocked for up to "
+                       f"{LOGIN_BAN_WINDOW_MIN} minutes.")
+        raise HTTPException(status_code=401, detail="Invalid password")
 
 
 @app.post("/api/auth/logout")
@@ -1483,6 +1874,57 @@ async def get_info(request: Request):
         "scale": streamer.scale,
         "wallpaper": get_setting("wallpaper"),
     }
+
+
+def _system_stats() -> dict:
+    """Host CPU% + RAM (bytes). Uses psutil when available; native fallback else."""
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return {
+            "cpu": round(psutil.cpu_percent(interval=None), 1),  # non-blocking, % since last call
+            "mem_used": int(vm.used),
+            "mem_total": int(vm.total),
+            "mem_percent": round(vm.percent, 1),
+        }
+    except Exception:
+        pass
+    cpu = mem_used = mem_total = mem_percent = None
+    try:  # rough CPU% from load average / core count
+        cpu = round(min(100.0, os.getloadavg()[0] / (os.cpu_count() or 1) * 100), 1)
+    except Exception:
+        pass
+    try:
+        if platform.system() == "Darwin":
+            mem_total = int(subprocess.run(["sysctl", "-n", "hw.memsize"],
+                                           capture_output=True, text=True, timeout=3).stdout.strip())
+            vs = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=3).stdout
+            page = int((re.search(r"page size of (\d+)", vs) or [0, 4096])[1]) if "page size" in vs else 4096
+            def _pg(key):
+                m = re.search(rf"{key}:\s+(\d+)\.", vs)
+                return int(m.group(1)) if m else 0
+            mem_used = (_pg("Pages active") + _pg("Pages wired down")
+                        + _pg("Pages occupied by compressor")) * page
+            mem_percent = round(mem_used / mem_total * 100, 1) if mem_total else None
+        else:  # Linux /proc/meminfo
+            info = {}
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, _, v = line.partition(":")
+                    info[k.strip()] = int(v.strip().split()[0]) * 1024
+            mem_total = info.get("MemTotal")
+            avail = info.get("MemAvailable", info.get("MemFree", 0))
+            mem_used = (mem_total - avail) if mem_total else None
+            mem_percent = round(mem_used / mem_total * 100, 1) if mem_total else None
+    except Exception:
+        pass
+    return {"cpu": cpu, "mem_used": mem_used, "mem_total": mem_total, "mem_percent": mem_percent}
+
+
+@app.get("/api/stats")
+async def system_stats(request: Request):
+    _require_token(request)
+    return await asyncio.to_thread(_system_stats)
 
 
 @app.websocket("/ws")
@@ -1526,11 +1968,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     scale=data.get("scale"),
                 )
             elif msg_type == "term_create":
-                session = term_manager.create()
+                req_cwd = (data.get("cwd") or "").strip()
+                start_cwd = os.path.realpath(os.path.expanduser(req_cwd)) if req_cwd else None
+                if start_cwd and not os.path.isdir(start_cwd):
+                    start_cwd = None
+                start_name = str(data.get("name", ""))[:80]
+                session = term_manager.create(cwd=start_cwd, name=start_name)
                 session.subscribers.add(websocket)
                 await websocket.send_json({
                     "type": "term_created",
                     "session_id": session.session_id,
+                    "name": session.name,
                     "buffer": "",
                 })
                 # Notify every OTHER connected client so they can subscribe
@@ -1851,6 +2299,85 @@ async def make_directory(request: Request):
     return {"success": True, "path": str(dir_path)}
 
 
+@app.post("/api/files/rename")
+async def rename_file(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    raw_path = body.get("path", "")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise HTTPException(status_code=400, detail="Path required")
+    src = Path(os.path.expanduser(raw_path)).resolve()
+    name_in = body.get("name", "")
+    raw = name_in.strip() if isinstance(name_in, str) else ""
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    # New name must be a bare filename — no traversal / separators.
+    if not raw or raw in (".", "..") or "/" in raw or "\\" in raw or "\x00" in raw:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    dest = src.parent / raw
+    if dest == src:
+        return {"success": True, "path": str(src), "name": src.name}
+    # Block real clobbers, but allow a case-only rename on case-insensitive
+    # filesystems (there dest.exists() is True for src's own inode).
+    if dest.exists() and not os.path.samefile(src, dest):
+        raise HTTPException(status_code=409, detail="An item with that name already exists")
+    try:
+        src.rename(dest)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not rename: {e}")
+    return {"success": True, "path": str(dest), "name": dest.name}
+
+
+def _unique_zip_path(src: Path) -> Path:
+    out = src.parent / f"{src.name}.zip"
+    i = 1
+    while out.exists():
+        out = src.parent / f"{src.name} ({i}).zip"
+        i += 1
+    return out
+
+
+def _make_zip(src: Path) -> Path:
+    """Zip a file or (recursively) a folder into a sibling <name>.zip."""
+    out = _unique_zip_path(src)
+    try:
+        if src.is_dir():
+            # make_archive appends '.zip' to base_name; root_dir/base_dir make the
+            # archive contain the folder itself (<name>/...). The output lives in the
+            # parent dir, a sibling of src, so it never archives itself.
+            shutil.make_archive(str(out)[:-4], "zip", root_dir=str(src.parent), base_dir=src.name)
+        else:
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(src, arcname=src.name)
+    except Exception:
+        out.unlink(missing_ok=True)  # don't leave a partial/corrupt zip behind
+        raise
+    return out
+
+
+@app.post("/api/files/zip")
+async def zip_file(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    if not verify_token(token):
+        raise HTTPException(status_code=401)
+
+    body = await request.json()
+    raw_path = body.get("path", "")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise HTTPException(status_code=400, detail="Path required")
+    src = Path(os.path.expanduser(raw_path)).resolve()
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        out = await asyncio.to_thread(_make_zip, src)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not create zip: {e}")
+    return {"success": True, "path": str(out), "name": out.name}
+
+
 @app.post("/api/settings/password")
 async def change_password(request: Request):
     token = request.headers.get("Authorization", "").replace("Bearer ", "")
@@ -2009,10 +2536,47 @@ async def servers_interpreters(request: Request, cwd: str = Query("")):
     return await asyncio.to_thread(lambda: {"interpreters": server_manager.interpreters(cwd)})
 
 
+@app.get("/api/servers/pyenv")
+async def servers_pyenv_info(request: Request):
+    _require_token(request)
+    return await asyncio.to_thread(server_manager.pyenv_info)
+
+
+@app.post("/api/servers/pyenv")
+async def servers_pyenv_create(request: Request):
+    _require_token(request)
+    body = await request.json()
+    try:
+        return await asyncio.to_thread(
+            server_manager.create_pyenv_virtualenv, body.get("base", ""), body.get("name", ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/servers/suggest-port")
 async def servers_suggest_port(request: Request, cwd: str = Query(""), entry: str = Query("")):
     _require_token(request)
     return await asyncio.to_thread(lambda: {"port": server_manager.suggest_port(cwd, entry)})
+
+
+@app.post("/api/servers/{sid}/setup-env")
+async def servers_setup_env(sid: str, request: Request):
+    _require_token(request)
+    body = await request.json()
+    try:
+        return await asyncio.to_thread(server_manager.setup_env, sid, body.get("base_python", ""))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Service not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/servers/{sid}/setup-env/log")
+async def servers_setup_log(sid: str, request: Request):
+    _require_token(request)
+    if not server_manager.get(sid):
+        raise HTTPException(status_code=404, detail="Service not found")
+    return await asyncio.to_thread(server_manager.setup_log, sid)
 
 
 @app.post("/api/servers/base-dir")
@@ -2082,6 +2646,17 @@ async def servers_restart(sid: str, request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/servers/{sid}/git-pull")
+async def servers_git_pull(sid: str, request: Request):
+    _require_token(request)
+    try:
+        return await asyncio.to_thread(server_manager.git_pull, sid)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Service not found")
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/servers/{sid}/logs")
 async def servers_logs(sid: str, request: Request, lines: int = Query(300)):
     _require_token(request)
@@ -2130,6 +2705,246 @@ async def servers_deploy_log(sid: str, request: Request):
     if not server_manager.get(sid):
         raise HTTPException(status_code=404, detail="Service not found")
     return await asyncio.to_thread(server_manager.deploy_log, sid)
+
+
+# ============================================================
+# Client Project (CRM) — generic CRUD + dashboard + uploads
+# ============================================================
+def _cp_to_dict(entity, row):
+    d = dict(row)
+    for jc in CP_JSON.get(entity, ()):  # decode JSON columns on the way out
+        v = d.get(jc)
+        if isinstance(v, str) and v:
+            try:
+                d[jc] = json.loads(v)
+            except Exception:
+                pass
+    return d
+
+
+def _cp_clean(entity, key, value):
+    if key in CP_JSON.get(entity, ()) or isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return value
+
+
+def _cp_log(entity, action, data):
+    """Auto-append a timeline entry for create/update/delete of CRM records."""
+    if entity == "activity":
+        return
+    label = data.get("name") or data.get("title") or data.get("feature") or ""
+    msg = f"{action} {entity}" + (f": {label}" if label else "")
+    try:
+        conn = get_db()
+        now = datetime.now().isoformat()
+        conn.execute(
+            "INSERT INTO cp_activity (id, project_id, client_id, kind, message, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (uuid.uuid4().hex[:8], str(data.get("project_id") or ""),
+             str(data.get("client_id") or ""), entity, msg, now, now))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@app.get("/api/cp/dashboard")
+async def cp_dashboard(request: Request):
+    _require_token(request)
+
+    def work():
+        conn = get_db()
+        def s(q, *a):
+            return conn.execute(q, a).fetchone()[0]
+        today = datetime.now().date().isoformat()
+        soon = (datetime.now() + timedelta(days=14)).date().isoformat()
+        out = {
+            "clients_total": s("SELECT COUNT(*) FROM cp_clients"),
+            "clients_active": s("SELECT COUNT(*) FROM cp_clients WHERE status='active'"),
+            "projects_total": s("SELECT COUNT(*) FROM cp_projects"),
+            "projects_active": s("SELECT COUNT(*) FROM cp_projects WHERE status='active'"),
+            "projects_delivered": s("SELECT COUNT(*) FROM cp_projects WHERE status='delivered'"),
+            "issues_open": s("SELECT COUNT(*) FROM cp_issues WHERE status NOT IN ('verified','closed')"),
+            "issues_critical": s("SELECT COUNT(*) FROM cp_issues WHERE severity='critical' AND status NOT IN ('verified','closed')"),
+            "tasks_open": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done')"),
+            "tasks_overdue": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done') AND due_date<>'' AND due_date < ?", today),
+            "cr_open": s("SELECT COUNT(*) FROM cp_change_requests WHERE status='requested'"),
+            "total_budget": s("SELECT COALESCE(SUM(CAST(NULLIF(budget,'') AS REAL)),0) FROM cp_projects"),
+            "outstanding": s("SELECT COALESCE(SUM(CAST(NULLIF(amount,'') AS REAL)),0) FROM cp_payments WHERE COALESCE(paid,'0') NOT IN ('1','true','True')"),
+        }
+        out["deadlines"] = [dict(r) for r in conn.execute(
+            "SELECT id,name,deliver_date,status FROM cp_projects WHERE status='active' "
+            "AND deliver_date<>'' AND deliver_date <= ? ORDER BY deliver_date LIMIT 10", (soon,)).fetchall()]
+        out["critical_issues"] = [dict(r) for r in conn.execute(
+            "SELECT id,project_id,title,severity,status FROM cp_issues "
+            "WHERE severity='critical' AND status NOT IN ('verified','closed') "
+            "ORDER BY created_at DESC LIMIT 10").fetchall()]
+        out["recent_activity"] = [dict(r) for r in conn.execute(
+            "SELECT * FROM cp_activity ORDER BY created_at DESC LIMIT 15").fetchall()]
+        conn.close()
+        return out
+
+    return await asyncio.to_thread(work)
+
+
+@app.post("/api/cp/upload")
+async def cp_upload(file: UploadFile = File(...), token: str = Form(""),
+                    project_id: str = Form(""), client_id: str = Form(""),
+                    issue_id: str = Form(""), category: str = Form("")):
+    if not verify_token(token):
+        raise HTTPException(status_code=401)
+    os.makedirs(CP_FILES_DIR, exist_ok=True)
+    raw = os.path.basename(file.filename or "file")
+    if not raw or "/" in raw or "\\" in raw:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    rid = uuid.uuid4().hex[:8]
+    stored = os.path.join(CP_FILES_DIR, f"{rid}__{raw}")
+    size = 0
+    try:
+        with open(stored, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large")
+                f.write(chunk)
+    except HTTPException:
+        try:
+            os.remove(stored)
+        except OSError:
+            pass
+        raise
+    except Exception as e:  # don't leave an orphaned partial file
+        try:
+            os.remove(stored)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+    now = datetime.now().isoformat()
+    conn = get_db()
+    conn.execute(
+        "INSERT INTO cp_files (id,project_id,client_id,issue_id,name,path,category,notes,created_at,updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (rid, project_id, client_id, issue_id, raw, stored, category, "", now, now))
+    conn.commit()
+    row = conn.execute("SELECT * FROM cp_files WHERE id=?", (rid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+
+@app.get("/api/cp/{entity}")
+async def cp_list(entity: str, request: Request):
+    _require_token(request)
+    cols = CP_ENTITIES.get(entity)
+    if cols is None:
+        raise HTTPException(status_code=404, detail="Unknown entity")
+    filters = {k: v for k, v in request.query_params.items() if k in cols or k == "id"}
+
+    def work():
+        conn = get_db()
+        sql = f"SELECT * FROM cp_{entity}"
+        if filters:
+            sql += " WHERE " + " AND ".join(f"{k}=?" for k in filters)
+        sql += " ORDER BY CAST(order_idx AS INTEGER), created_at" if "order_idx" in cols else " ORDER BY created_at DESC"
+        rows = conn.execute(sql, tuple(filters.values())).fetchall()
+        conn.close()
+        return [_cp_to_dict(entity, r) for r in rows]
+
+    return {"items": await asyncio.to_thread(work)}
+
+
+@app.post("/api/cp/{entity}")
+async def cp_create(entity: str, request: Request):
+    _require_token(request)
+    cols = CP_ENTITIES.get(entity)
+    if cols is None:
+        raise HTTPException(status_code=404, detail="Unknown entity")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request")
+
+    def work():
+        rid = uuid.uuid4().hex[:8]
+        data = {k: _cp_clean(entity, k, body[k]) for k in body if k in cols}
+        now = datetime.now().isoformat()
+        keys = ["id"] + list(data.keys()) + ["created_at", "updated_at"]
+        vals = [rid] + list(data.values()) + [now, now]
+        conn = get_db()
+        conn.execute(f"INSERT INTO cp_{entity} ({','.join(keys)}) VALUES ({','.join(['?'] * len(keys))})", vals)
+        conn.commit()
+        row = conn.execute(f"SELECT * FROM cp_{entity} WHERE id=?", (rid,)).fetchone()
+        conn.close()
+        _cp_log(entity, "created", {**body, "id": rid})
+        return _cp_to_dict(entity, row)
+
+    return await asyncio.to_thread(work)
+
+
+@app.put("/api/cp/{entity}/{rid}")
+async def cp_update(entity: str, rid: str, request: Request):
+    _require_token(request)
+    cols = CP_ENTITIES.get(entity)
+    if cols is None:
+        raise HTTPException(status_code=404, detail="Unknown entity")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request")
+
+    def work():
+        data = {k: _cp_clean(entity, k, body[k]) for k in body if k in cols}
+        conn = get_db()
+        if not conn.execute(f"SELECT 1 FROM cp_{entity} WHERE id=?", (rid,)).fetchone():
+            conn.close()
+            return None
+        if data:
+            sets = ", ".join(f"{k}=?" for k in data) + ", updated_at=?"
+            conn.execute(f"UPDATE cp_{entity} SET {sets} WHERE id=?",
+                         (*data.values(), datetime.now().isoformat(), rid))
+            conn.commit()
+        row = conn.execute(f"SELECT * FROM cp_{entity} WHERE id=?", (rid,)).fetchone()
+        conn.close()
+        _cp_log(entity, "updated", {**body, "id": rid})
+        return _cp_to_dict(entity, row)
+
+    res = await asyncio.to_thread(work)
+    if res is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    return res
+
+
+@app.delete("/api/cp/{entity}/{rid}")
+async def cp_delete(entity: str, rid: str, request: Request):
+    _require_token(request)
+    cols = CP_ENTITIES.get(entity)
+    if cols is None:
+        raise HTTPException(status_code=404, detail="Unknown entity")
+
+    def work():
+        conn = get_db()
+        row = conn.execute(f"SELECT * FROM cp_{entity} WHERE id=?", (rid,)).fetchone()
+        if not row:
+            conn.close()
+            return False
+        d = dict(row)
+        conn.execute(f"DELETE FROM cp_{entity} WHERE id=?", (rid,))
+        conn.commit()
+        conn.close()
+        _cp_log(entity, "deleted", d)
+        return True
+
+    if not await asyncio.to_thread(work):
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"success": True}
 
 
 # ============================================================

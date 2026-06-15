@@ -35,7 +35,7 @@ export function useWebSocket() {
           registry.reconcile(msg.sessions.map((s) => s.session_id))
           break
         case 'term_created': {
-          term().upsert({ session_id: msg.session_id, alive: true, name: '' })
+          term().upsert({ session_id: msg.session_id, alive: true, name: msg.name ?? '' })
           term().setActive(msg.session_id)
           // The creating client is already a server-side subscriber, so mark the
           // instance hydrated to skip a redundant term_subscribe round-trip.

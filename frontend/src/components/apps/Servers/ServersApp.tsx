@@ -8,6 +8,7 @@ import { ServerCard } from './ServerCard'
 import { AddServerDialog } from './AddServerDialog'
 import { LogViewer } from './LogViewer'
 import { DeployDialog } from './DeployDialog'
+import { SetupEnvDialog } from './SetupEnvDialog'
 import './servers.css'
 
 type DialogState = { mode: 'add' } | { mode: 'edit'; service: ManagedService }
@@ -24,6 +25,7 @@ export function ServersApp({ focused }: AppProps) {
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [logService, setLogService] = useState<ManagedService | null>(null)
   const [deployService, setDeployService] = useState<ManagedService | null>(null)
+  const [setupService, setSetupService] = useState<ManagedService | null>(null)
 
   const [editingBaseDir, setEditingBaseDir] = useState(false)
   const [baseDirDraft, setBaseDirDraft] = useState('')
@@ -201,6 +203,7 @@ export function ServersApp({ focused }: AppProps) {
                   onEdit={(svc) => setDialog({ mode: 'edit', service: svc })}
                   onViewLogs={(svc) => setLogService(svc)}
                   onPublish={(svc) => setDeployService(svc)}
+                  onSetupEnv={(svc) => setSetupService(svc)}
                 />
               ))}
             </AnimatePresence>
@@ -236,6 +239,17 @@ export function ServersApp({ focused }: AppProps) {
             key={deployService.id}
             service={deployService}
             onClose={() => setDeployService(null)}
+            onChanged={() => void fetchServers({ silent: true })}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {setupService && (
+          <SetupEnvDialog
+            key={setupService.id}
+            service={setupService}
+            onClose={() => setSetupService(null)}
             onChanged={() => void fetchServers({ silent: true })}
           />
         )}

@@ -5,6 +5,7 @@ import { TerminalApp } from '@/components/apps/Terminal/TerminalApp'
 import { FilesApp } from '@/components/apps/Files/FilesApp'
 import { SettingsApp } from '@/components/apps/Settings/SettingsApp'
 import { ServersApp } from '@/components/apps/Servers/ServersApp'
+import { ClientProjectApp } from '@/components/apps/ClientProject/ClientProjectApp'
 
 export interface AppDef {
   kind: AppKind
@@ -50,7 +51,16 @@ export const APP_REGISTRY: Record<AppKind, AppDef> = {
     singleton: true,
     Component: ServersApp,
   },
+  clientproject: {
+    kind: 'clientproject',
+    title: 'Client Project',
+    defaultSize: { w: 1100, h: 720 },
+    singleton: true,
+    Component: ClientProjectApp,
+  },
 }
 
 // Order shown on the desktop grid and in the dock.
-export const APP_ORDER: AppKind[] = ['remote', 'terminal', 'files', 'settings', 'servers']
+export const APP_ORDER: AppKind[] = [
+  'remote', 'terminal', 'files', 'settings', 'servers', 'clientproject',
+]

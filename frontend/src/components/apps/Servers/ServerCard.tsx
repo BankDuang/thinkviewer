@@ -5,10 +5,12 @@ import type { ManagedService } from '@/types'
 import * as api from '@/lib/restClient'
 import { notify } from '@/store/notificationStore'
 import { confirmDialog } from '@/store/dialogStore'
+import { useTerminalStore } from '@/store/terminalStore'
+import { openApp } from '@/lib/openApp'
 import { formatDate } from '@/lib/format'
 import { Icon } from '@/components/common/Icon'
 
-type Action = 'start' | 'stop' | 'restart' | 'delete'
+type Action = 'start' | 'stop' | 'restart' | 'delete' | 'pull'
 type Status = 'running' | 'starting' | 'stopped'
 
 interface ServerCardProps {
@@ -18,6 +20,7 @@ interface ServerCardProps {
   onEdit: (service: ManagedService) => void
   onViewLogs: (service: ManagedService) => void
   onPublish: (service: ManagedService) => void
+  onSetupEnv: (service: ManagedService) => void
 }
 
 /** 90 -> "1m 30s", 3700 -> "1h 1m". */
@@ -65,6 +68,7 @@ export function ServerCard({
   onEdit,
   onViewLogs,
   onPublish,
+  onSetupEnv,
 }: ServerCardProps) {
   const [busy, setBusy] = useState<Action | null>(null)
   const status = statusOf(service)
@@ -104,8 +108,49 @@ export function ServerCard({
     }
   }
 
+  async function onPull() {
+    if (busy) return
+    setBusy('pull')
+    try {
+      const res = await api.gitPull(service.id)
+      onPatch(res.service)
+      // git writes the diffstat to stdout but the fetch banner to stderr (which
+      // lands last in the combined output), so don't just take the final line —
+      // pick the most informative one. Full output is in the service log.
+      const lines = res.output.split('\n').map((l) => l.trim()).filter(Boolean)
+      const summary =
+        lines.find((l) => /already up to date/i.test(l)) ??
+        lines.find((l) => /changed|insertion|deletion/i.test(l)) ??
+        lines.find((l) => /^updating |fast-forward/i.test(l)) ??
+        lines[lines.length - 1] ??
+        (res.ok ? 'Up to date' : 'git pull failed')
+      if (!res.ok) {
+        notify('error', `Pull failed: ${summary} — see View logs`)
+      } else if (res.restart_error) {
+        notify('warn', `Pulled, but restart failed: ${res.restart_error}`)
+      } else if (res.restarted) {
+        notify('ok', `Pulled & restarted — ${summary}`)
+      } else {
+        notify('ok', `Pulled — ${summary}`)
+      }
+    } catch (e) {
+      notify('error', e instanceof api.ApiError ? e.message : 'Could not pull from GitHub')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function onOpenTerminal() {
+    // Hand the project off to the Terminal app: it focuses a tab named after the
+    // service if one is already open, otherwise spawns one cd'd into the project
+    // ROOT (service.cwd may be a run subfolder like <root>/server).
+    useTerminalStore.getState().requestOpen(service.name, service.root)
+    openApp('terminal')
+  }
+
   const spin = (a: Action) => (busy === a ? <Icon name="refresh" size={15} className="spin" /> : null)
   const interp = service.python ? basename(service.python) : 'default'
+  const isVenv = service.python.includes('/.venv/')
   const portLinkable = running && service.port != null && service.port_open === true
 
   return (
@@ -166,6 +211,7 @@ export function ServerCard({
           <span className="srv-meta-item" title={service.python || 'Default interpreter'}>
             <Icon name="terminal" size={13} strokeWidth={1.8} />
             <span className="srv-mono">{interp}</span>
+            {isVenv && <span className="srv-venv-chip">venv</span>}
           </span>
           {service.port != null && (
             <span className="srv-meta-item" title="Port">
@@ -230,6 +276,24 @@ export function ServerCard({
         </button>
         <button
           className="srv-iconbtn"
+          onClick={() => void onPull()}
+          disabled={busy != null}
+          title="Pull from GitHub (git pull, then restart if running)"
+          aria-label="Pull from GitHub"
+        >
+          {spin('pull') ?? <Icon name="git-branch" size={16} />}
+        </button>
+        <button
+          className="srv-iconbtn"
+          onClick={onOpenTerminal}
+          disabled={busy != null}
+          title="Open in Terminal (cd into the project)"
+          aria-label="Open in Terminal"
+        >
+          <Icon name="terminal" size={16} />
+        </button>
+        <button
+          className="srv-iconbtn"
           onClick={() => onViewLogs(service)}
           disabled={busy != null}
           title="View logs"
@@ -245,6 +309,15 @@ export function ServerCard({
           aria-label="Publish / HTTPS"
         >
           <Icon name="lock" size={16} />
+        </button>
+        <button
+          className="srv-iconbtn"
+          onClick={() => onSetupEnv(service)}
+          disabled={busy != null}
+          title="Set up environment"
+          aria-label="Set up environment"
+        >
+          <Icon name="download" size={16} />
         </button>
         <button
           className="srv-iconbtn"

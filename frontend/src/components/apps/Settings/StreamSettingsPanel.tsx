@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent, CSSProperties } from 'react'
 import { useStreamStore } from '@/store/streamStore'
+import { useDesktopStore } from '@/store/desktopStore'
 import { Icon } from '@/components/common/Icon'
 
 interface SliderProps {
@@ -73,6 +74,8 @@ export function StreamSettingsPanel() {
   const fps = useStreamStore((s) => s.fps)
   const scale = useStreamStore((s) => s.scale)
   const setSettings = useStreamStore((s) => s.setSettings)
+  const showMenuStats = useDesktopStore((s) => s.showMenuStats)
+  const setMenuStats = useDesktopStore((s) => s.setMenuStats)
 
   return (
     <>
@@ -119,6 +122,28 @@ export function StreamSettingsPanel() {
           Higher quality and frame rate look smoother but use more bandwidth. Scale sets the
           streamed resolution relative to the host display.
         </p>
+      </div>
+
+      <div className="set-section">
+        <div className="set-label">Menu bar</div>
+        <div className="set-group">
+          <div className="set-toggle-row">
+            <span className="set-toggle-text">
+              <span className="set-toggle-name">Show CPU / RAM</span>
+              <span className="set-toggle-sub">Live host CPU and memory meters in the top menu bar</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showMenuStats}
+              aria-label="Show CPU / RAM in menu bar"
+              className={`set-switch${showMenuStats ? ' is-on' : ''}`}
+              onClick={() => setMenuStats(!showMenuStats)}
+            >
+              <span className="set-switch-knob" />
+            </button>
+          </div>
+        </div>
       </div>
     </>
   )
