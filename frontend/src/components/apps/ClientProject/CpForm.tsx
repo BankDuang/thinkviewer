@@ -7,6 +7,8 @@ import { notify } from '@/store/notificationStore'
 import { Icon } from '@/components/common/Icon'
 import { useCp } from './CpContext'
 import { cpBool, cpLabel } from './cpFormat'
+import { ImageField } from './ImageField'
+import { FixVersions } from './FixVersions'
 import type { CpField, CpSpec } from './specs'
 
 interface CpFormProps {
@@ -105,6 +107,24 @@ export function CpForm({ spec, initial, onClose, onSaved }: CpFormProps) {
             </option>
           ))}
         </select>
+      )
+    if (type === 'images')
+      return (
+        <ImageField
+          value={Array.isArray(val) ? (val as string[]) : []}
+          onChange={(v) => set(f.key, v)}
+          projectId={String(form.project_id || '')}
+          issueId={initial?.id ? String(initial.id) : undefined}
+        />
+      )
+    if (type === 'versions')
+      return (
+        <FixVersions
+          value={Array.isArray(val) ? val : []}
+          onChange={(v) => set(f.key, v)}
+          projectId={String(form.project_id || '')}
+          issueId={initial?.id ? String(initial.id) : undefined}
+        />
       )
     if (type === 'tags') {
       const arr: string[] = Array.isArray(val) ? val : val ? String(val).split(',') : []

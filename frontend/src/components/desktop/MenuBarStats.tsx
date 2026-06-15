@@ -10,11 +10,18 @@ function gib(bytes: number | null): number {
   return bytes ? bytes / 1073741824 : 0
 }
 
-// green → amber → red as the meter fills
+// CPU: green → amber → red by load %
 function tone(p: number | null): string {
   if (p == null) return '#8a8a96'
   if (p >= 85) return '#ff453a'
   if (p >= 60) return '#ff9f0a'
+  return '#34c759'
+}
+
+// RAM: colored by absolute GB used — ≤10 GB green, 10–14 GB amber, ≥14 GB red
+function ramTone(usedGib: number): string {
+  if (usedGib >= 14) return '#ff453a'
+  if (usedGib > 10) return '#ff9f0a'
   return '#34c759'
 }
 
@@ -66,7 +73,7 @@ export function MenuBarStats() {
         label="RAM"
         percent={memPct}
         value={`${gib(stats.mem_used).toFixed(1)}/${Math.round(gib(stats.mem_total))} GB`}
-        color={tone(stats.mem_percent)}
+        color={ramTone(gib(stats.mem_used))}
       />
     </div>
   )

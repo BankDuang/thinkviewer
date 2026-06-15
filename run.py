@@ -103,6 +103,8 @@ DEFAULT_SERVERS_DIR = os.path.realpath(
     os.path.expanduser(os.getenv("THINKVIEWER_SERVERS_DIR", "~/Desktop/public_server")))
 SERVER_LOG_DIR = os.path.join(BASE_DIR, "server_logs")
 ENTRY_CANDIDATES = ("run.py", "main.py", "app.py", "server.py", "wsgi.py", "asgi.py")
+# Apps a user can be granted visibility of (mirrors the frontend AppKind union).
+APP_KINDS = ["remote", "terminal", "files", "settings", "servers", "clientproject"]
 
 # ---- Client Project (CRM + project tracking) "app" --------------------------
 CP_FILES_DIR = os.path.join(BASE_DIR, "client_project_files")
@@ -117,16 +119,16 @@ CP_ENTITIES = {
     "phases": ["project_id", "name", "status", "owner", "pending", "waiting_client",
                "order_idx", "notes"],
     "tasks": ["project_id", "phase_id", "title", "description", "assignee", "status",
-              "priority", "due_date"],
+              "priority", "due_date", "attachments"],
     "issues": ["project_id", "title", "description", "severity", "status", "assignee",
-               "resolution", "fixed_date", "client_confirmed", "attachments"],
+               "resolution", "fixed_date", "client_confirmed", "attachments", "fixes"],
     "change_requests": ["project_id", "title", "description", "impact_scope",
                         "impact_timeline", "impact_budget", "man_days", "status",
                         "approved_by", "approved_date"],
     "meeting_notes": ["project_id", "client_id", "title", "date", "attendees",
                       "summary", "decisions", "action_items", "waiting_client"],
     "requirements": ["project_id", "feature", "description", "priority", "status",
-                     "in_scope", "wireframe", "conditions", "checklist"],
+                     "in_scope", "wireframe", "conditions", "checklist", "order_idx"],
     "payments": ["client_id", "project_id", "title", "invoice_no", "amount",
                  "due_date", "paid", "paid_date", "installment", "notes"],
     "activity": ["project_id", "client_id", "kind", "message"],
@@ -135,7 +137,8 @@ CP_ENTITIES = {
 # columns whose values are JSON (encoded on write, decoded on read).
 CP_JSON = {
     "clients": {"channels"},
-    "issues": {"attachments"},
+    "tasks": {"attachments"},
+    "issues": {"attachments", "fixes"},
     "meeting_notes": {"action_items"},
     "requirements": {"checklist"},
 }
@@ -462,6 +465,20 @@ def init_db():
             if _c not in _have:
                 c.execute(f"ALTER TABLE cp_{_ent} ADD COLUMN {_c} TEXT")
 
+    # Users + per-user app visibility (admin = the connection password)
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE,
+        password_hash TEXT,
+        role TEXT,
+        apps TEXT,
+        created_at TEXT
+    )""")
+    # sessions gain user_id so a token resolves to a user.
+    _sess_cols = {r[1] for r in c.execute("PRAGMA table_info(sessions)").fetchall()}
+    if "user_id" not in _sess_cols:
+        c.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+
     conn.commit()
 
     # Generate device ID if not exists
@@ -489,6 +506,24 @@ def init_db():
             c.execute("INSERT INTO settings (key, value) VALUES ('password_hash', ?)", (pw_hash,))
         else:
             password = row[0]
+
+    # Bootstrap an 'admin' user from the connection password if none exist yet,
+    # so the current password logs in as admin (username "admin").
+    if not c.execute("SELECT 1 FROM users LIMIT 1").fetchone():
+        admin_hash = (c.execute("SELECT value FROM settings WHERE key='password_hash'")
+                      .fetchone() or [None])[0]
+        c.execute(
+            "INSERT INTO users (id, username, password_hash, role, apps, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (uuid.uuid4().hex[:8], "admin", admin_hash, "admin",
+             json.dumps(APP_KINDS), datetime.now().isoformat()))
+
+    # THINKVIEWER_PASSWORD, when set, is authoritative for the admin login: keep
+    # the admin's hash in sync with it on every boot so the shown connection
+    # password matches and changing the env var still recovers admin access.
+    if ENV_PASSWORD:
+        c.execute("UPDATE users SET password_hash=? WHERE username='admin'",
+                  (hashlib.sha256(ENV_PASSWORD.encode()).hexdigest(),))
 
     conn.commit()
     conn.close()
@@ -524,17 +559,64 @@ def verify_password(password):
     return stored_hash is not None and pw_hash == stored_hash
 
 
-def create_session(ip_address=""):
+def create_session(ip_address="", user_id=None):
     token = str(uuid.uuid4())
-    expires = (datetime.now() + timedelta(hours=24)).isoformat()
     conn = get_db()
+    # expires_at uses SQLite UTC so it compares correctly against datetime('now')
+    # (a naive local-time string drifted the real TTL on non-UTC hosts).
     conn.execute(
-        "INSERT INTO sessions (token, expires_at, ip_address) VALUES (?, ?, ?)",
-        (token, expires, ip_address),
+        "INSERT INTO sessions (token, expires_at, ip_address, user_id) "
+        "VALUES (?, datetime('now', '+24 hours'), ?, ?)",
+        (token, ip_address, user_id),
     )
     conn.commit()
     conn.close()
     return token
+
+
+def _user_for_token(token):
+    """The user a (valid, unexpired) token belongs to, or None."""
+    if not token:
+        return None
+    conn = get_db()
+    row = conn.execute(
+        "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+        "WHERE s.token=? AND s.expires_at > datetime('now')", (token,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {"id": row["id"], "username": row["username"], "role": row["role"],
+            "apps": json.loads(row["apps"] or "[]")}
+
+
+def verify_user(username, password):
+    """Resolve a username/password to a user dict, or None."""
+    if not username or not password:
+        return None
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    conn.close()
+    if row and row["password_hash"] and secrets.compare_digest(pw_hash, row["password_hash"]):
+        return {"id": row["id"], "username": row["username"], "role": row["role"],
+                "apps": json.loads(row["apps"] or "[]")}
+    return None
+
+
+def _current_user(request: "Request"):
+    """The authenticated user for this request, or 401."""
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    user = _user_for_token(token)
+    if not user:
+        raise HTTPException(status_code=401)
+    return user
+
+
+def _require_admin(request: "Request"):
+    user = _current_user(request)
+    if user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+    return user
 
 
 # --- Login brute-force protection (per-IP, derived from connection_log) ------
@@ -542,6 +624,7 @@ LOGIN_MAX_FAILS = 5        # wrong-password attempts allowed per IP ...
 LOGIN_BAN_WINDOW_MIN = 60  # ... within this window; also ~how long the block lasts
 _TRUSTED_PROXIES = {"127.0.0.1", "::1"}  # our deploy-kit nginx runs on this host
 _login_lock = asyncio.Lock()             # serialize attempts so the cap is race-free
+_users_lock = asyncio.Lock()             # serialize user mutations (atomic last-admin guard)
 
 
 def _client_ip(request: "Request") -> str:
@@ -572,15 +655,7 @@ def _recent_login_fails(ip: str) -> int:
 
 
 def verify_token(token):
-    if not token:
-        return False
-    conn = get_db()
-    row = conn.execute(
-        "SELECT * FROM sessions WHERE token=? AND expires_at > datetime('now')",
-        (token,),
-    ).fetchone()
-    conn.close()
-    return row is not None
+    return _user_for_token(token) is not None
 
 
 def delete_session(token):
@@ -1812,6 +1887,7 @@ async def login(request: Request):
         raise HTTPException(status_code=400, detail="Invalid request")
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid request")
+    username = str(body.get("username", "")).strip()
     password = body.get("password", "")
     ip = _client_ip(request)
 
@@ -1825,17 +1901,22 @@ async def login(request: Request):
                 detail=f"Too many failed attempts — this IP is blocked. "
                        f"Try again in up to {LOGIN_BAN_WINDOW_MIN} minutes.")
 
-        if verify_password(password):
+        user = verify_user(username, password)
+        if user:
             conn = get_db()
-            # A correct password clears this IP's failure streak.
+            # A correct login clears this IP's failure streak.
             conn.execute("DELETE FROM connection_log WHERE ip_address=? AND action='login_fail'", (ip,))
             conn.execute("INSERT INTO connection_log (ip_address, action) VALUES (?, 'login')", (ip,))
             conn.commit()
             conn.close()
-            return {"success": True, "token": create_session(ip)}
+            return {
+                "success": True,
+                "token": create_session(ip, user["id"]),
+                "user": {"username": user["username"], "role": user["role"], "apps": user["apps"]},
+            }
 
-        # Wrong password — record the failure. Keep messages generic (no exact
-        # remaining-attempt count) so a brute-forcer can't pace itself precisely.
+        # Wrong credentials — record the failure. Keep the message generic (don't
+        # reveal whether the username exists, nor the remaining-attempt count).
         conn = get_db()
         conn.execute("INSERT INTO connection_log (ip_address, action) VALUES (?, 'login_fail')", (ip,))
         conn.commit()
@@ -1845,13 +1926,186 @@ async def login(request: Request):
                 status_code=429,
                 detail=f"Too many failed attempts — this IP is now blocked for up to "
                        f"{LOGIN_BAN_WINDOW_MIN} minutes.")
-        raise HTTPException(status_code=401, detail="Invalid password")
+        raise HTTPException(status_code=401, detail="Invalid username or password")
 
 
 @app.post("/api/auth/logout")
 async def logout(request: Request):
     body = await request.json()
     delete_session(body.get("token", ""))
+    return {"success": True}
+
+
+@app.get("/api/me")
+async def get_me(request: Request):
+    u = _current_user(request)
+    return {"username": u["username"], "role": u["role"], "apps": u["apps"]}
+
+
+# ---- Users (admin-only management) ----------------------------------------
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{2,32}$")
+
+
+def _clean_apps(apps):
+    return [a for a in apps if a in APP_KINDS] if isinstance(apps, list) else []
+
+
+def _user_public(row) -> dict:
+    return {"id": row["id"], "username": row["username"], "role": row["role"],
+            "apps": json.loads(row["apps"] or "[]")}
+
+
+@app.get("/api/users")
+async def users_list(request: Request):
+    _require_admin(request)
+
+    def work():
+        conn = get_db()
+        rows = conn.execute("SELECT * FROM users ORDER BY username COLLATE NOCASE").fetchall()
+        conn.close()
+        return [_user_public(r) for r in rows]
+
+    return {"users": await asyncio.to_thread(work), "app_kinds": APP_KINDS}
+
+
+@app.post("/api/users")
+async def users_create(request: Request):
+    _require_admin(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request")
+    username = str(body.get("username", "")).strip()
+    password = str(body.get("password", ""))
+    role = body.get("role", "user")
+    apps = _clean_apps(body.get("apps", []))
+    if not _USERNAME_RE.match(username):
+        raise HTTPException(status_code=400, detail="Username: 2–32 chars, letters/numbers/._-")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    if role not in ("admin", "user"):
+        raise HTTPException(status_code=400, detail="Invalid role")
+    if role == "admin":
+        apps = list(APP_KINDS)
+
+    def work():
+        conn = get_db()
+        if conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+            conn.close()
+            return None
+        rid = uuid.uuid4().hex[:8]
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, apps, created_at) VALUES (?,?,?,?,?,?)",
+            (rid, username, hashlib.sha256(password.encode()).hexdigest(), role,
+             json.dumps(apps), datetime.now().isoformat()))
+        conn.commit()
+        row = conn.execute("SELECT * FROM users WHERE id=?", (rid,)).fetchone()
+        conn.close()
+        return _user_public(row)
+
+    async with _users_lock:
+        res = await asyncio.to_thread(work)
+    if res is None:
+        raise HTTPException(status_code=409, detail="Username already exists")
+    return res
+
+
+@app.put("/api/users/{uid}")
+async def users_update(uid: str, request: Request):
+    admin = _require_admin(request)
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request")
+
+    def work():
+        conn = get_db()
+        row = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            conn.close()
+            return ("missing", None)
+        cur = dict(row)
+        sets, vals = [], []
+        if "username" in body:
+            un = str(body["username"]).strip()
+            if not _USERNAME_RE.match(un):
+                conn.close()
+                return ("bad", "Username: 2–32 chars, letters/numbers/._-")
+            other = conn.execute("SELECT 1 FROM users WHERE username=? AND id<>?", (un, uid)).fetchone()
+            if other:
+                conn.close()
+                return ("bad", "Username already exists")
+            sets.append("username=?"); vals.append(un)
+        new_role = cur["role"]
+        if "role" in body:
+            if body["role"] not in ("admin", "user"):
+                conn.close()
+                return ("bad", "Invalid role")
+            new_role = body["role"]
+            sets.append("role=?"); vals.append(new_role)
+        # Never let the last admin be demoted (would lock everyone out of mgmt).
+        if cur["role"] == "admin" and new_role != "admin":
+            admins = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+            if admins <= 1:
+                conn.close()
+                return ("bad", "Can't demote the last admin")
+        if "apps" in body:
+            apps = list(APP_KINDS) if new_role == "admin" else _clean_apps(body["apps"])
+            sets.append("apps=?"); vals.append(json.dumps(apps))
+        elif "role" in body:
+            # normalize apps on a role flip: admin -> all, user -> none
+            sets.append("apps=?")
+            vals.append(json.dumps(list(APP_KINDS) if new_role == "admin" else []))
+        if "password" in body and body["password"]:
+            if len(str(body["password"])) < 4:
+                conn.close()
+                return ("bad", "Password must be at least 4 characters")
+            sets.append("password_hash=?")
+            vals.append(hashlib.sha256(str(body["password"]).encode()).hexdigest())
+        if sets:
+            vals.append(uid)
+            conn.execute(f"UPDATE users SET {', '.join(sets)} WHERE id=?", vals)
+            conn.commit()
+        row2 = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        conn.close()
+        return ("ok", _user_public(row2))
+
+    async with _users_lock:
+        kind, payload = await asyncio.to_thread(work)
+    if kind == "missing":
+        raise HTTPException(status_code=404, detail="User not found")
+    if kind == "bad":
+        raise HTTPException(status_code=400, detail=payload)
+    return payload
+
+
+@app.delete("/api/users/{uid}")
+async def users_delete(uid: str, request: Request):
+    admin = _require_admin(request)
+    if uid == admin["id"]:
+        raise HTTPException(status_code=400, detail="You can't delete your own account")
+
+    def work():
+        conn = get_db()
+        row = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+        if not row:
+            conn.close()
+            return "missing"
+        if row["role"] == "admin":
+            admins = conn.execute("SELECT COUNT(*) FROM users WHERE role='admin'").fetchone()[0]
+            if admins <= 1:
+                conn.close()
+                return "last_admin"
+        conn.execute("DELETE FROM users WHERE id=?", (uid,))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))  # revoke their tokens
+        conn.commit()
+        conn.close()
+        return "ok"
+
+    async with _users_lock:
+        res = await asyncio.to_thread(work)
+    if res == "missing":
+        raise HTTPException(status_code=404, detail="User not found")
+    if res == "last_admin":
+        raise HTTPException(status_code=400, detail="Can't delete the last admin")
     return {"success": True}
 
 
@@ -2380,19 +2634,22 @@ async def zip_file(request: Request):
 
 @app.post("/api/settings/password")
 async def change_password(request: Request):
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not verify_token(token):
-        raise HTTPException(status_code=401)
+    user = _current_user(request)  # changes the CURRENT user's password
 
     body = await request.json()
     new_password = body.get("password", "")
-
     if len(new_password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
 
     pw_hash = hashlib.sha256(new_password.encode()).hexdigest()
-    set_setting("password", new_password)
-    set_setting("password_hash", pw_hash)
+    conn = get_db()
+    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (pw_hash, user["id"]))
+    conn.commit()
+    conn.close()
+    # Keep the admin's password as the shown "connection password" (/api/info).
+    if user["role"] == "admin":
+        set_setting("password", new_password)
+        set_setting("password_hash", pw_hash)
 
     return {"success": True}
 

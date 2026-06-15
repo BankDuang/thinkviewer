@@ -28,6 +28,7 @@ export function RequirementsChecklist({
   const [newFeature, setNewFeature] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [itemText, setItemText] = useState('')
+  const [dragId, setDragId] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -53,6 +54,7 @@ export function RequirementsChecklist({
         status: 'proposed',
         in_scope: '1',
         priority: 'medium',
+        order_idx: String(reqs.length),
       })
       setNewFeature('')
       after()
@@ -76,6 +78,34 @@ export function RequirementsChecklist({
   async function saveItems(r: CpRecord, items: ChecklistItem[]) {
     setReqs((prev) => prev.map((x) => (x.id === r.id ? { ...x, checklist: items } : x)))
     await api.cpUpdate('requirements', String(r.id), { checklist: items })
+  }
+
+  // --- drag to reorder: rewrite order_idx of the affected rows ---------------
+  async function onDrop(targetId: string) {
+    if (!dragId || dragId === targetId) {
+      setDragId(null)
+      return
+    }
+    const arr = [...reqs]
+    const from = arr.findIndex((r) => String(r.id) === dragId)
+    const to = arr.findIndex((r) => String(r.id) === targetId)
+    if (from < 0 || to < 0) return setDragId(null)
+    const [moved] = arr.splice(from, 1)
+    arr.splice(to, 0, moved)
+    setReqs(arr) // optimistic
+    setDragId(null)
+    try {
+      await Promise.all(
+        arr.map((r, i) =>
+          String(r.order_idx ?? '') === String(i)
+            ? Promise.resolve()
+            : api.cpUpdate('requirements', String(r.id), { order_idx: String(i) }),
+        ),
+      )
+    } catch {
+      notify('error', 'Could not save the new order')
+    }
+    load()
   }
 
   const total = reqs.length
@@ -124,8 +154,19 @@ export function RequirementsChecklist({
             const isOpen = expanded === String(r.id)
             const rdone = String(r.status) === 'done'
             return (
-              <div className={clsx('cp-req-item', rdone && 'is-done')} key={String(r.id)}>
+              <div
+                className={clsx('cp-req-item', rdone && 'is-done', dragId === String(r.id) && 'is-drag')}
+                key={String(r.id)}
+                draggable
+                onDragStart={() => setDragId(String(r.id))}
+                onDragEnd={() => setDragId(null)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => void onDrop(String(r.id))}
+              >
                 <div className="cp-req-row">
+                  <span className="cp-req-grip" aria-hidden title="Drag to reorder">
+                    ⠿
+                  </span>
                   <button className={clsx('cp-checkbox', rdone && 'is-on')} onClick={() => void toggleReq(r)} aria-label="Toggle done">
                     {rdone && <Icon name="check" size={12} strokeWidth={3} />}
                   </button>
@@ -136,11 +177,7 @@ export function RequirementsChecklist({
                   ) : (
                     <span className="cp-chip is-warn">change req</span>
                   )}
-                  <button
-                    className="cp-req-toggle"
-                    onClick={() => setExpanded(isOpen ? null : String(r.id))}
-                    title="Checklist"
-                  >
+                  <button className="cp-req-toggle" onClick={() => setExpanded(isOpen ? null : String(r.id))} title="Details">
                     {items.length > 0 && (
                       <span className="cp-req-count">
                         {idone}/{items.length}
@@ -154,44 +191,55 @@ export function RequirementsChecklist({
                 </div>
 
                 {isOpen && (
-                  <div className="cp-checklist">
-                    {items.map((it, idx) => (
-                      <div className="cp-checklist-item" key={idx}>
-                        <button
-                          className={clsx('cp-checkbox sm', it.done && 'is-on')}
-                          onClick={() =>
-                            void saveItems(
-                              r,
-                              items.map((x, j) => (j === idx ? { ...x, done: !x.done } : x)),
-                            )
-                          }
-                        >
-                          {it.done && <Icon name="check" size={10} strokeWidth={3} />}
-                        </button>
-                        <span className={clsx('cp-checklist-text', it.done && 'is-done')}>{it.text}</span>
-                        <button
-                          className="cp-rowbtn is-danger"
-                          onClick={() => void saveItems(r, items.filter((_, j) => j !== idx))}
-                          aria-label="Remove"
-                        >
-                          <Icon name="close" size={12} />
-                        </button>
+                  <div className="cp-req-detail">
+                    {/* long, multi-line requirement detail */}
+                    <textarea
+                      className="tv-field cp-input"
+                      rows={3}
+                      defaultValue={String(r.description ?? '')}
+                      placeholder="Details — describe the requirement (multi-line, write as much as you need)…"
+                      onChange={(e) => setReqs((prev) => prev.map((x) => (x.id === r.id ? { ...x, description: e.target.value } : x)))}
+                      onBlur={(e) => void api.cpUpdate('requirements', String(r.id), { description: e.target.value })}
+                    />
+                    <div className="cp-checklist">
+                      {items.map((it, idx) => (
+                        <div className="cp-checklist-item" key={idx}>
+                          <button
+                            className={clsx('cp-checkbox sm', it.done && 'is-on')}
+                            onClick={() =>
+                              void saveItems(
+                                r,
+                                items.map((x, j) => (j === idx ? { ...x, done: !x.done } : x)),
+                              )
+                            }
+                          >
+                            {it.done && <Icon name="check" size={10} strokeWidth={3} />}
+                          </button>
+                          <span className={clsx('cp-checklist-text', it.done && 'is-done')}>{it.text}</span>
+                          <button
+                            className="cp-rowbtn is-danger"
+                            onClick={() => void saveItems(r, items.filter((_, j) => j !== idx))}
+                            aria-label="Remove"
+                          >
+                            <Icon name="close" size={12} />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="cp-checklist-add">
+                        <input
+                          className="tv-field"
+                          placeholder="Add checklist item…"
+                          value={isOpen ? itemText : ''}
+                          spellCheck={false}
+                          onChange={(e) => setItemText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && itemText.trim()) {
+                              void saveItems(r, [...items, { text: itemText.trim(), done: false }])
+                              setItemText('')
+                            }
+                          }}
+                        />
                       </div>
-                    ))}
-                    <div className="cp-checklist-add">
-                      <input
-                        className="tv-field"
-                        placeholder="Add checklist item…"
-                        value={isOpen ? itemText : ''}
-                        spellCheck={false}
-                        onChange={(e) => setItemText(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && itemText.trim()) {
-                            void saveItems(r, [...items, { text: itemText.trim(), done: false }])
-                            setItemText('')
-                          }
-                        }}
-                      />
                     </div>
                   </div>
                 )}

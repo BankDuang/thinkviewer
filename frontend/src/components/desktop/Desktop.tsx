@@ -5,7 +5,7 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { useWindowStore } from '@/store/windowStore'
 import { useSessionStore } from '@/store/sessionStore'
 import { useDesktopStore } from '@/store/desktopStore'
-import { APP_ORDER } from '@/registry/appRegistry'
+import { visibleApps } from '@/registry/appRegistry'
 import type { AppKind } from '@/types'
 import { Wallpaper } from './Wallpaper'
 import { MenuBar } from './MenuBar'
@@ -22,6 +22,8 @@ export function Desktop() {
   const order = useWindowStore((s) => s.order)
   const focusedId = useWindowStore((s) => s.focusedId)
   const loadWallpapers = useDesktopStore((s) => s.loadWallpapers)
+  const user = useSessionStore((s) => s.user)
+  const apps = visibleApps(user)
   const [selectedIcon, setSelectedIcon] = useState<AppKind | null>(null)
 
   useWebSocket()
@@ -38,7 +40,7 @@ export function Desktop() {
       <MenuBar />
 
       <div className="desktop-icons" onPointerDown={(e) => e.stopPropagation()}>
-        {APP_ORDER.map((app) => (
+        {apps.map((app) => (
           <DesktopIcon
             key={app}
             app={app}

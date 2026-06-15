@@ -1,10 +1,13 @@
 import type { AppKind } from '@/types'
-import { APP_REGISTRY } from '@/registry/appRegistry'
+import { APP_REGISTRY, visibleApps } from '@/registry/appRegistry'
 import { useWindowStore } from '@/store/windowStore'
+import { useSessionStore } from '@/store/sessionStore'
 import { MENUBAR_H } from './layout'
 
 /** Open (or focus, if singleton) an app window, centered with a slight cascade. */
 export function openApp(app: AppKind): string {
+  // Defense in depth: never open an app the current user isn't allowed to see.
+  if (!visibleApps(useSessionStore.getState().user).includes(app)) return ''
   const def = APP_REGISTRY[app]
   const store = useWindowStore.getState()
   const count = store.order.length

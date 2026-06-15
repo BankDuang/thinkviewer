@@ -69,6 +69,19 @@ export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
     [spec.entity, spec.titleField, load, refreshRelations],
   )
 
+  const onToggle = useCallback(
+    async (rec: CpRecord, col: { key: string }, next: string) => {
+      setRows((prev) => prev.map((r) => (r.id === rec.id ? { ...r, [col.key]: next } : r)))
+      try {
+        await api.cpUpdate(spec.entity, String(rec.id), { [col.key]: next })
+      } catch (e) {
+        notify('error', e instanceof api.ApiError ? e.message : 'Could not update')
+        load() // revert optimistic change
+      }
+    },
+    [spec.entity, load],
+  )
+
   return (
     <div className="cp-section">
       <div className="cp-section-head">
@@ -102,7 +115,13 @@ export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
           <Icon name="refresh" size={26} className="spin" />
         </div>
       ) : (
-        <CpTable spec={spec} rows={filtered} onEdit={(r) => setEditing(r)} onDelete={(r) => void onDelete(r)} />
+        <CpTable
+          spec={spec}
+          rows={filtered}
+          onEdit={(r) => setEditing(r)}
+          onDelete={(r) => void onDelete(r)}
+          onToggle={(rec, col, next) => void onToggle(rec, col, next)}
+        />
       )}
 
       <AnimatePresence>

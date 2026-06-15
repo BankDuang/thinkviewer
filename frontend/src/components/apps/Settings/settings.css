@@ -160,6 +160,115 @@
 .set-switch.is-on .set-switch-knob {
   transform: translateX(17px);
 }
+
+/* ---- Users & Access ---- */
+.set-userhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.set-user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+}
+.set-user-row + .set-user-row {
+  border-top: 1px solid var(--hairline);
+}
+.set-user-info {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+}
+.set-user-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.set-role {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: capitalize;
+  padding: 1px 8px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+}
+.set-role.is-admin {
+  background: rgba(48, 209, 88, 0.18);
+  color: #4ade80;
+}
+.set-user-apps {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.set-user-actions {
+  display: flex;
+  gap: 4px;
+}
+.set-iconbtn {
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.75);
+  background: transparent;
+  cursor: pointer;
+}
+.set-iconbtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.set-iconbtn.is-danger:hover {
+  background: rgba(255, 69, 58, 0.18);
+  color: #ff6b6b;
+}
+.set-user-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.set-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.set-edit-field > label {
+  font-size: 11.5px;
+  opacity: 0.7;
+}
+.set-edit-field .tv-field {
+  width: 100%;
+}
+.set-app-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.set-appcheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+.set-appcheck.is-on {
+  border-color: rgba(10, 132, 255, 0.6);
+  background: rgba(10, 132, 255, 0.16);
+}
+.set-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .set-row + .set-row,
 .set-group > .set-slider-row + .set-slider-row {
   border-top: 1px solid var(--hairline);

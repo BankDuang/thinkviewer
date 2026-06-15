@@ -1,4 +1,22 @@
 // REST DTOs. Mirrors the FastAPI JSON responses in main.py.
+import type { AppKind } from './windows'
+
+export type Role = 'admin' | 'user'
+
+/** The logged-in user (from login / GET /api/me). */
+export interface User {
+  username: string
+  role: Role
+  apps: AppKind[] // apps this user may see (admins see all)
+}
+
+/** Admin-facing user record (GET/POST/PUT /api/users). */
+export interface ManagedUser {
+  id: string
+  username: string
+  role: Role
+  apps: AppKind[]
+}
 
 export interface FileEntry {
   name: string
@@ -45,6 +63,7 @@ export interface SystemStats {
 export interface LoginResp {
   success: boolean
   token: string
+  user: User
 }
 
 export interface PasteImageResp {

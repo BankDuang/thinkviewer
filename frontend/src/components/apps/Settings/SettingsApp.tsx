@@ -7,9 +7,11 @@ import { StreamSettingsPanel } from './StreamSettingsPanel'
 import { WallpaperPicker } from './WallpaperPicker'
 import { PasswordPanel } from './PasswordPanel'
 import { ConnectionInfo } from './ConnectionInfo'
+import { UsersPanel } from './UsersPanel'
+import { useSessionStore } from '@/store/sessionStore'
 import './settings.css'
 
-type Section = 'display' | 'wallpaper' | 'security' | 'about'
+type Section = 'display' | 'wallpaper' | 'security' | 'users' | 'about'
 
 interface NavDef {
   id: Section
@@ -42,6 +44,13 @@ const NAV: NavDef[] = [
     chip: 'linear-gradient(135deg, #ffae3c, #ff7a18)',
   },
   {
+    id: 'users',
+    label: 'Users',
+    title: 'Users & Access',
+    icon: 'users',
+    chip: 'linear-gradient(135deg, #34c759, #0e9171)',
+  },
+  {
     id: 'about',
     label: 'About',
     title: 'About & Connection',
@@ -51,19 +60,24 @@ const NAV: NavDef[] = [
 ]
 
 function isSection(v: unknown): v is Section {
-  return v === 'display' || v === 'wallpaper' || v === 'security' || v === 'about'
+  return (
+    v === 'display' || v === 'wallpaper' || v === 'security' || v === 'users' || v === 'about'
+  )
 }
 
 export function SettingsApp(props: AppProps) {
+  const isAdmin = useSessionStore((s) => s.user?.role === 'admin')
+  const nav = NAV.filter((n) => n.id !== 'users' || isAdmin) // Users section is admin-only
   const requested = props.props?.section
-  const [active, setActive] = useState<Section>(isSection(requested) ? requested : 'display')
-  const current = NAV.find((n) => n.id === active) ?? NAV[0]
+  const initial = isSection(requested) && nav.some((n) => n.id === requested) ? requested : 'display'
+  const [active, setActive] = useState<Section>(initial)
+  const current = nav.find((n) => n.id === active) ?? nav[0]
 
   return (
     <div className="set-root">
       <aside className="set-sidebar">
         <div className="set-sidebar-title">Settings</div>
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -93,6 +107,7 @@ export function SettingsApp(props: AppProps) {
             {active === 'display' && <StreamSettingsPanel />}
             {active === 'wallpaper' && <WallpaperPicker />}
             {active === 'security' && <PasswordPanel />}
+            {active === 'users' && <UsersPanel />}
             {active === 'about' && <ConnectionInfo />}
           </motion.div>
         </AnimatePresence>

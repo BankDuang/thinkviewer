@@ -13,6 +13,8 @@ export type CpFieldType =
   | 'tags'
   | 'relation'
   | 'server'
+  | 'images' // drag-drop image attachments (stored as a JSON path array)
+  | 'versions' // issue fix-attempt log (JSON array)
 
 export interface CpField {
   key: string
@@ -24,13 +26,16 @@ export interface CpField {
   placeholder?: string
 }
 
-export type CpColType = 'text' | 'badge' | 'money' | 'date' | 'relation' | 'server' | 'bool'
+export type CpColType = 'text' | 'badge' | 'money' | 'date' | 'relation' | 'server' | 'bool' | 'check'
 
 export interface CpColumn {
   key: string
   label: string
   type?: CpColType
   relation?: 'clients' | 'projects'
+  // for type 'check': status-style toggle (onValue/offValue) or a plain bool when omitted
+  onValue?: string
+  offValue?: string
 }
 
 export interface CpSpec {
@@ -146,6 +151,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
     icon: 'check',
     titleField: 'title',
     columns: [
+      { key: 'status', label: 'Done', type: 'check', onValue: 'done', offValue: 'todo' },
       { key: 'title', label: 'Task' },
       { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
       { key: 'assignee', label: 'Assignee' },
@@ -161,6 +167,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'assignee', label: 'Assignee' },
       { key: 'due_date', label: 'Due date', type: 'date' },
       { key: 'description', label: 'Description', type: 'textarea', full: true },
+      { key: 'attachments', label: 'Images', type: 'images', full: true },
     ],
     defaults: { status: 'todo', priority: 'medium' },
   },
@@ -175,8 +182,8 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
       { key: 'severity', label: 'Severity', type: 'badge' },
       { key: 'status', label: 'Status', type: 'badge' },
-      { key: 'assignee', label: 'Owner' },
-      { key: 'client_confirmed', label: 'Confirmed', type: 'bool' },
+      { key: 'status', label: 'Fixed', type: 'check', onValue: 'fixed', offValue: 'open' },
+      { key: 'client_confirmed', label: 'Confirmed', type: 'check' },
     ],
     fields: [
       { key: 'title', label: 'Issue title' },
@@ -188,6 +195,8 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'client_confirmed', label: 'Client confirmed', type: 'checkbox' },
       { key: 'description', label: 'Description', type: 'textarea', full: true },
       { key: 'resolution', label: 'Resolution', type: 'textarea', full: true },
+      { key: 'attachments', label: 'Images', type: 'images', full: true },
+      { key: 'fixes', label: 'Fix versions (in case it isn’t fixed yet)', type: 'versions', full: true },
     ],
     defaults: { severity: 'medium', status: 'open' },
   },

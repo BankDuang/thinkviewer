@@ -11,9 +11,10 @@ interface CpTableProps {
   rows: CpRecord[]
   onEdit: (rec: CpRecord) => void
   onDelete: (rec: CpRecord) => void
+  onToggle?: (rec: CpRecord, col: CpColumn, next: string) => void
 }
 
-export function CpTable({ spec, rows, onEdit, onDelete }: CpTableProps) {
+export function CpTable({ spec, rows, onEdit, onDelete, onToggle }: CpTableProps) {
   const { clients, projects } = useCp()
   const nameMap = useMemo(() => {
     const m: Record<string, Record<string, string>> = { clients: {}, projects: {} }
@@ -37,6 +38,21 @@ export function CpTable({ spec, rows, onEdit, onDelete }: CpTableProps) {
         ) : (
           <span className="cp-dim">—</span>
         )
+      case 'check': {
+        const checked = col.onValue != null ? String(v) === col.onValue : cpBool(v)
+        return (
+          <button
+            className={clsx('cp-checkbox sm', checked && 'is-on')}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle?.(rec, col, checked ? (col.offValue ?? '0') : (col.onValue ?? '1'))
+            }}
+            aria-label="Toggle"
+          >
+            {checked && <Icon name="check" size={11} strokeWidth={3} />}
+          </button>
+        )
+      }
       case 'relation':
         return <span>{(col.relation && nameMap[col.relation]?.[String(v)]) || <span className="cp-dim">—</span>}</span>
       default:
@@ -58,8 +74,8 @@ export function CpTable({ spec, rows, onEdit, onDelete }: CpTableProps) {
       <table className="cp-table">
         <thead>
           <tr>
-            {spec.columns.map((c) => (
-              <th key={c.key}>{c.label}</th>
+            {spec.columns.map((c, ci) => (
+              <th key={ci}>{c.label}</th>
             ))}
             <th className="cp-col-actions" />
           </tr>
@@ -67,8 +83,8 @@ export function CpTable({ spec, rows, onEdit, onDelete }: CpTableProps) {
         <tbody>
           {rows.map((rec) => (
             <tr key={String(rec.id)} onDoubleClick={() => onEdit(rec)}>
-              {spec.columns.map((c) => (
-                <td key={c.key}>{cell(c, rec)}</td>
+              {spec.columns.map((c, ci) => (
+                <td key={ci}>{cell(c, rec)}</td>
               ))}
               <td className="cp-col-actions">
                 <button className="cp-rowbtn" onClick={() => onEdit(rec)} title="Edit" aria-label="Edit">

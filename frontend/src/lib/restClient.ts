@@ -3,6 +3,7 @@
 // so this module centralizes that so callers never have to think about it.
 
 import type {
+  AppKind,
   CpDashboard,
   CpRecord,
   DeployInfo,
@@ -15,12 +16,15 @@ import type {
   PyenvInfo,
   LoginResp,
   ManagedService,
+  ManagedUser,
   ReachabilityResp,
+  Role,
   ServersResp,
   ServiceInput,
   SetupLog,
   StreamSettings,
   SystemStats,
+  User,
   WallpapersResp,
 } from '@/types'
 
@@ -78,11 +82,11 @@ function bearerJson<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 // --- Auth (no token) -------------------------------------------------------
-export async function login(password: string): Promise<LoginResp> {
+export async function login(username: string, password: string): Promise<LoginResp> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ username, password }),
   })
   if (res.ok) return (await res.json()) as LoginResp
   // Surface the server's message (wrong password / brute-force block) verbatim,
@@ -109,6 +113,19 @@ export function logout(): Promise<{ success: boolean }> {
 // --- Device / settings (Bearer) -------------------------------------------
 export const getInfo = () => bearerJson<DeviceInfo>('GET', '/api/info')
 export const getStats = () => bearerJson<SystemStats>('GET', '/api/stats')
+export const getMe = () => bearerJson<User>('GET', '/api/me')
+
+// --- Users (admin-only management; Bearer) ---------------------------------
+export const listUsers = () =>
+  bearerJson<{ users: ManagedUser[]; app_kinds: AppKind[] }>('GET', '/api/users')
+export const createUser = (u: { username: string; password: string; role: Role; apps: AppKind[] }) =>
+  bearerJson<ManagedUser>('POST', '/api/users', u)
+export const updateUser = (
+  id: string,
+  u: Partial<{ username: string; password: string; role: Role; apps: AppKind[] }>,
+) => bearerJson<ManagedUser>('PUT', `/api/users/${id}`, u)
+export const deleteUser = (id: string) =>
+  bearerJson<{ success: boolean }>('DELETE', `/api/users/${id}`)
 export const setStream = (s: Partial<StreamSettings>) =>
   bearerJson<{ success: boolean } & StreamSettings>('POST', '/api/settings/stream', s)
 export const setPassword = (password: string) =>

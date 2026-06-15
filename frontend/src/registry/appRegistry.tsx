@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { AppKind, AppProps } from '@/types'
+import type { AppKind, AppProps, User } from '@/types'
 import { RemoteDesktop } from '@/components/apps/RemoteDesktop/RemoteDesktop'
 import { TerminalApp } from '@/components/apps/Terminal/TerminalApp'
 import { FilesApp } from '@/components/apps/Files/FilesApp'
@@ -64,3 +64,11 @@ export const APP_REGISTRY: Record<AppKind, AppDef> = {
 export const APP_ORDER: AppKind[] = [
   'remote', 'terminal', 'files', 'settings', 'servers', 'clientproject',
 ]
+
+/** Apps the current user may see: admins see everything, others only what the
+ *  admin granted them (used to filter the dock, desktop, and openApp). */
+export function visibleApps(user: User | null | undefined): AppKind[] {
+  if (!user) return []
+  if (user.role === 'admin') return APP_ORDER
+  return APP_ORDER.filter((a) => user.apps.includes(a))
+}
