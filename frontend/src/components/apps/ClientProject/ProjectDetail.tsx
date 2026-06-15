@@ -21,6 +21,7 @@ const TABS: { key: string; label: string; icon: IconName }[] = [
   { key: 'issues', label: 'Issues', icon: 'bug' },
   { key: 'change_requests', label: 'Change Requests', icon: 'git-branch' },
   { key: 'phases', label: 'Phases', icon: 'list' },
+  { key: 'notes', label: 'Notes', icon: 'pencil' },
   { key: 'files', label: 'Files', icon: 'folder' },
 ]
 
@@ -30,6 +31,7 @@ function ProjectFiles({ projectId }: { projectId: string }) {
   const [files, setFiles] = useState<CpRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
@@ -40,6 +42,25 @@ function ProjectFiles({ projectId }: { projectId: string }) {
       .finally(() => setLoading(false))
   }, [projectId])
   useEffect(() => load(), [load])
+
+  // forget selections for files that disappeared after a reload
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      const ids = new Set(files.map((f) => String(f.id)))
+      const next = new Set([...prev].filter((id) => ids.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [files])
+
+  function toggleSel(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -62,6 +83,27 @@ function ProjectFiles({ projectId }: { projectId: string }) {
     await api.cpDelete('files', String(rec.id)).then(load)
   }
 
+  async function delSelected() {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    const n = ids.length
+    const ok = await confirmDialog({
+      title: `Delete ${n} file${n > 1 ? 's' : ''}?`,
+      message: 'The selected files will be permanently removed.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
+    const results = await Promise.allSettled(ids.map((id) => api.cpDelete('files', id)))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed) notify('error', `${failed} file${failed > 1 ? 's' : ''} could not be deleted`)
+    else notify('ok', `Deleted ${n} file${n > 1 ? 's' : ''}`)
+    setSelected(new Set())
+    load()
+  }
+
+  const allSelected = files.length > 0 && selected.size === files.length
+
   return (
     <div>
       <div className="cp-tab-actions">
@@ -70,6 +112,25 @@ function ProjectFiles({ projectId }: { projectId: string }) {
           Upload file
         </button>
         <input ref={inputRef} type="file" style={{ display: 'none' }} onChange={(e) => void onPick(e)} />
+        {files.length > 0 && (
+          <button
+            className="tv-btn"
+            onClick={() => setSelected(allSelected ? new Set() : new Set(files.map((f) => String(f.id))))}
+          >
+            {allSelected ? 'Deselect all' : 'Select all'}
+          </button>
+        )}
+        {selected.size > 0 && (
+          <div className="cp-sel-bar">
+            <span className="cp-sel-count">{selected.size} selected</span>
+            <button className="tv-btn" onClick={() => setSelected(new Set())}>
+              Clear
+            </button>
+            <button className="tv-btn cp-sel-del" onClick={() => void delSelected()}>
+              <Icon name="trash" size={14} /> Delete selected
+            </button>
+          </div>
+        )}
       </div>
       {loading ? (
         <div className="cp-empty">
@@ -82,28 +143,45 @@ function ProjectFiles({ projectId }: { projectId: string }) {
         </div>
       ) : (
         <div className="cp-file-grid">
-          {files.map((f) => (
-            <div className="cp-file" key={String(f.id)}>
-              {IMG_RE.test(String(f.name)) ? (
-                <img className="cp-file-thumb" src={api.downloadUrl(String(f.path))} alt={String(f.name)} />
-              ) : (
-                <div className="cp-file-thumb">
-                  <Icon name="file" size={30} />
-                </div>
-              )}
-              <div className="cp-file-meta">
-                <a className="cp-file-name" href={api.downloadUrl(String(f.path))} target="_blank" rel="noreferrer">
-                  {String(f.name)}
-                </a>
-                <div className="cp-file-row">
-                  <span className="cp-dim">{String(f.category || 'file')}</span>
-                  <button className="cp-rowbtn is-danger" onClick={() => void del(f)} aria-label="Delete">
-                    <Icon name="trash" size={13} />
-                  </button>
+          {files.map((f) => {
+            const id = String(f.id)
+            const sel = selected.has(id)
+            return (
+              <div className={clsx('cp-file', sel && 'is-sel')} key={id}>
+                <button
+                  className={clsx('cp-file-check', sel && 'is-on')}
+                  onClick={() => toggleSel(id)}
+                  aria-label={sel ? 'Deselect' : 'Select'}
+                  aria-pressed={sel}
+                >
+                  {sel && <Icon name="check" size={12} strokeWidth={3} />}
+                </button>
+                {IMG_RE.test(String(f.name)) ? (
+                  <img
+                    className="cp-file-thumb"
+                    src={api.downloadUrl(String(f.path))}
+                    alt={String(f.name)}
+                    onClick={() => toggleSel(id)}
+                  />
+                ) : (
+                  <div className="cp-file-thumb" onClick={() => toggleSel(id)}>
+                    <Icon name="file" size={30} />
+                  </div>
+                )}
+                <div className="cp-file-meta">
+                  <a className="cp-file-name" href={api.downloadUrl(String(f.path))} target="_blank" rel="noreferrer">
+                    {String(f.name)}
+                  </a>
+                  <div className="cp-file-row">
+                    <span className="cp-dim">{String(f.category || 'file')}</span>
+                    <button className="cp-rowbtn is-danger" onClick={() => void del(f)} aria-label="Delete">
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -242,6 +320,7 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
           <CrudSection spec={CP_SPECS.change_requests} fixedFilter={{ project_id: projectId }} />
         )}
         {tab === 'phases' && <CrudSection spec={CP_SPECS.phases} fixedFilter={{ project_id: projectId }} />}
+        {tab === 'notes' && <CrudSection spec={CP_SPECS.notes} fixedFilter={{ project_id: projectId }} />}
         {tab === 'files' && <ProjectFiles projectId={projectId} />}
       </div>
 

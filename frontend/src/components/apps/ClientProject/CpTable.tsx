@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import clsx from 'clsx'
 import type { CpRecord } from '@/types'
 import { Icon } from '@/components/common/Icon'
 import { useCp } from './CpContext'
+import { CpDetail } from './CpDetail'
 import { cpBadgeClass, cpBool, cpDate, cpLabel, cpMoney } from './cpFormat'
 import type { CpColumn, CpSpec } from './specs'
 
@@ -15,6 +16,7 @@ interface CpTableProps {
 }
 
 export function CpTable({ spec, rows, onEdit, onDelete, onToggle }: CpTableProps) {
+  const [expanded, setExpanded] = useState<string | null>(null)
   const { clients, projects } = useCp()
   const nameMap = useMemo(() => {
     const m: Record<string, Record<string, string>> = { clients: {}, projects: {} }
@@ -69,6 +71,8 @@ export function CpTable({ spec, rows, onEdit, onDelete, onToggle }: CpTableProps
     )
   }
 
+  const colSpan = spec.columns.length + 1
+
   return (
     <div className="cp-table-wrap">
       <table className="cp-table">
@@ -81,26 +85,60 @@ export function CpTable({ spec, rows, onEdit, onDelete, onToggle }: CpTableProps
           </tr>
         </thead>
         <tbody>
-          {rows.map((rec) => (
-            <tr key={String(rec.id)} onDoubleClick={() => onEdit(rec)}>
-              {spec.columns.map((c, ci) => (
-                <td key={ci}>{cell(c, rec)}</td>
-              ))}
-              <td className="cp-col-actions">
-                <button className="cp-rowbtn" onClick={() => onEdit(rec)} title="Edit" aria-label="Edit">
-                  <Icon name="pencil" size={14} />
-                </button>
-                <button
-                  className="cp-rowbtn is-danger"
-                  onClick={() => onDelete(rec)}
-                  title="Delete"
-                  aria-label="Delete"
+          {rows.map((rec) => {
+            const id = String(rec.id)
+            const isOpen = expanded === id
+            return (
+              <Fragment key={id}>
+                <tr
+                  className={clsx('cp-row-click', isOpen && 'is-expanded')}
+                  onClick={() => setExpanded((cur) => (cur === id ? null : id))}
+                  title="Click to view details"
                 >
-                  <Icon name="trash" size={14} />
-                </button>
-              </td>
-            </tr>
-          ))}
+                  {spec.columns.map((c, ci) => (
+                    <td key={ci}>{cell(c, rec)}</td>
+                  ))}
+                  <td className="cp-col-actions">
+                    <Icon
+                      name="chevron-down"
+                      size={14}
+                      className="cp-row-caret"
+                      style={{ transform: isOpen ? 'rotate(180deg)' : undefined }}
+                    />
+                    <button
+                      className="cp-rowbtn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onEdit(rec)
+                      }}
+                      title="Edit"
+                      aria-label="Edit"
+                    >
+                      <Icon name="pencil" size={14} />
+                    </button>
+                    <button
+                      className="cp-rowbtn is-danger"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDelete(rec)
+                      }}
+                      title="Delete"
+                      aria-label="Delete"
+                    >
+                      <Icon name="trash" size={14} />
+                    </button>
+                  </td>
+                </tr>
+                {isOpen && (
+                  <tr className="cp-rdetail-row">
+                    <td colSpan={colSpan}>
+                      <CpDetail spec={spec} rec={rec} onEdit={() => onEdit(rec)} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
         </tbody>
       </table>
     </div>

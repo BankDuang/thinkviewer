@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import * as api from '@/lib/restClient'
 import { notify } from '@/store/notificationStore'
@@ -12,36 +12,68 @@ interface ImageFieldProps {
   issueId?: string
 }
 
-/** Drag-and-drop / multi-select image attachments with thumbnails + viewer. */
+/** Drag-drop / paste / multi-select image attachments with thumbnails + viewer. */
 export function ImageField({ value, onChange, projectId, issueId }: ImageFieldProps) {
   const paths = Array.isArray(value) ? value : []
   const [busy, setBusy] = useState(false)
   const [over, setOver] = useState(false)
   const [view, setView] = useState<number | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  // refs so the document-level paste handler always sees the latest values
+  const valueRef = useRef<string[]>(paths)
+  valueRef.current = paths
+  const activeRef = useRef(false) // pointer over OR keyboard focus on this field
 
-  async function upload(files: File[]) {
-    const imgs = files.filter((f) => f.type.startsWith('image/'))
-    if (!imgs.length) return
-    setBusy(true)
-    try {
-      const added: string[] = []
-      for (const f of imgs) {
-        const rec = await api.cpUpload(f, { project_id: projectId, issue_id: issueId, category: 'attachment' })
-        if (rec?.path) added.push(String(rec.path))
+  const doUpload = useCallback(
+    async (files: File[]) => {
+      const imgs = files.filter((f) => f.type.startsWith('image/'))
+      if (!imgs.length) return
+      setBusy(true)
+      try {
+        const added: string[] = []
+        for (const f of imgs) {
+          const rec = await api.cpUpload(f, { project_id: projectId, issue_id: issueId, category: 'attachment' })
+          if (rec?.path) added.push(String(rec.path))
+        }
+        if (added.length) onChange([...valueRef.current, ...added])
+      } catch (e) {
+        notify('error', e instanceof api.ApiError ? e.message : 'Upload failed')
+      } finally {
+        setBusy(false)
       }
-      if (added.length) onChange([...paths, ...added])
-    } catch (e) {
-      notify('error', e instanceof api.ApiError ? e.message : 'Upload failed')
-    } finally {
-      setBusy(false)
+    },
+    [onChange, projectId, issueId],
+  )
+
+  // Paste an image from the clipboard (⌘/Ctrl+V) when this field is hovered/focused.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (!activeRef.current) return
+      const files: File[] = []
+      for (const it of Array.from(e.clipboardData?.items ?? [])) {
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const f = it.getAsFile()
+          if (f) files.push(f)
+        }
+      }
+      if (files.length) {
+        e.preventDefault()
+        void doUpload(files)
+      }
     }
-  }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [doUpload])
 
   return (
     <div className="cp-imgfield">
       <div
         className={clsx('cp-dropzone', over && 'is-over', busy && 'is-busy')}
+        tabIndex={0}
+        onMouseEnter={() => (activeRef.current = true)}
+        onMouseLeave={() => (activeRef.current = false)}
+        onFocus={() => (activeRef.current = true)}
+        onBlur={() => (activeRef.current = false)}
         onDragOver={(e) => {
           e.preventDefault()
           setOver(true)
@@ -50,12 +82,12 @@ export function ImageField({ value, onChange, projectId, issueId }: ImageFieldPr
         onDrop={(e) => {
           e.preventDefault()
           setOver(false)
-          void upload(Array.from(e.dataTransfer.files))
+          void doUpload(Array.from(e.dataTransfer.files))
         }}
         onClick={() => !busy && inputRef.current?.click()}
       >
         <Icon name={busy ? 'refresh' : 'image'} size={17} className={busy ? 'spin' : undefined} />
-        <span>{busy ? 'Uploading…' : 'Drag images here or click to add'}</span>
+        <span>{busy ? 'Uploading…' : 'Drag, paste (⌘V), or click to add'}</span>
         <input
           ref={inputRef}
           type="file"
@@ -63,7 +95,7 @@ export function ImageField({ value, onChange, projectId, issueId }: ImageFieldPr
           multiple
           style={{ display: 'none' }}
           onChange={(e) => {
-            void upload(Array.from(e.target.files ?? []))
+            void doUpload(Array.from(e.target.files ?? []))
             e.target.value = ''
           }}
         />

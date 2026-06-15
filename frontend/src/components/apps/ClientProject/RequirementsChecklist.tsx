@@ -170,7 +170,13 @@ export function RequirementsChecklist({
                   <button className={clsx('cp-checkbox', rdone && 'is-on')} onClick={() => void toggleReq(r)} aria-label="Toggle done">
                     {rdone && <Icon name="check" size={12} strokeWidth={3} />}
                   </button>
-                  <span className="cp-req-feature">{String(r.feature)}</span>
+                  <button
+                    className="cp-req-feature"
+                    onClick={() => setExpanded(isOpen ? null : String(r.id))}
+                    title="Click to show details"
+                  >
+                    {String(r.feature)}
+                  </button>
                   {r.priority ? <span className={clsx('cp-badge', cpBadgeClass(r.priority))}>{cpLabel(r.priority)}</span> : null}
                   {String(r.in_scope) === '1' ? (
                     <span className="cp-chip">in scope</span>

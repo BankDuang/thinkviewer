@@ -31,6 +31,9 @@ uploads/
 server_logs/
 *.log
 
+# Runtime uploads (Client Project / CRM attachments + files) — user data, not code
+client_project_files/
+
 # Committed frontend build artifact (so the auto-updater always ships a working bundle)
 !frontend/dist/
 !frontend/dist/**

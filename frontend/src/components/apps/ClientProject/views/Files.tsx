@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import clsx from 'clsx'
 import * as api from '@/lib/restClient'
 import { notify } from '@/store/notificationStore'
 import { confirmDialog } from '@/store/dialogStore'
@@ -26,6 +27,7 @@ export function Files() {
   const [projectFilter, setProjectFilter] = useState('')
   const [category, setCategory] = useState<string>('Screenshot')
   const [uploading, setUploading] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
 
   const projectName = useCallback(
@@ -47,6 +49,25 @@ export function Files() {
   }, [projectFilter])
 
   useEffect(() => load(), [load])
+
+  // forget selections for files that disappeared after a reload / filter change
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev
+      const ids = new Set(items.map((f) => String(f.id)))
+      const next = new Set([...prev].filter((id) => ids.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [items])
+
+  const toggleSel = useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   const onPick = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -91,6 +112,27 @@ export function Files() {
     [load],
   )
 
+  const delSelected = useCallback(async () => {
+    const ids = [...selected]
+    if (ids.length === 0) return
+    const n = ids.length
+    const ok = await confirmDialog({
+      title: `Delete ${n} file${n > 1 ? 's' : ''}?`,
+      message: 'The selected files will be permanently removed.',
+      confirmLabel: 'Delete',
+      danger: true,
+    })
+    if (!ok) return
+    const results = await Promise.allSettled(ids.map((id) => api.cpDelete('files', id)))
+    const failed = results.filter((r) => r.status === 'rejected').length
+    if (failed) notify('error', `${failed} file${failed > 1 ? 's' : ''} could not be deleted`)
+    else notify('ok', `Deleted ${n} file${n > 1 ? 's' : ''}`)
+    setSelected(new Set())
+    load()
+  }, [selected, load])
+
+  const allSelected = items.length > 0 && selected.size === items.length
+
   return (
     <div className="cp-section">
       <div className="cp-section-head">
@@ -125,6 +167,25 @@ export function Files() {
               </option>
             ))}
           </select>
+          {items.length > 0 && (
+            <button
+              className="tv-btn"
+              onClick={() => setSelected(allSelected ? new Set() : new Set(items.map((f) => String(f.id))))}
+            >
+              {allSelected ? 'Deselect all' : 'Select all'}
+            </button>
+          )}
+          {selected.size > 0 && (
+            <div className="cp-sel-bar">
+              <span className="cp-sel-count">{selected.size} selected</span>
+              <button className="tv-btn" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+              <button className="tv-btn cp-sel-del" onClick={() => void delSelected()}>
+                <Icon name="trash" size={14} /> Delete selected
+              </button>
+            </div>
+          )}
           <button className="tv-btn" onClick={load} title="Refresh" aria-label="Refresh">
             <Icon name="refresh" size={14} className={loading ? 'spin' : undefined} />
           </button>
@@ -165,12 +226,21 @@ export function Files() {
             const proj = projectName(f.project_id)
             const cat = String(f.category ?? '')
             const sub = [cat, proj].filter(Boolean).join(' · ')
+            const sel = selected.has(id)
             return (
-              <div className="cp-file" key={id}>
+              <div className={clsx('cp-file', sel && 'is-sel')} key={id}>
+                <button
+                  className={clsx('cp-file-check', sel && 'is-on')}
+                  onClick={() => toggleSel(id)}
+                  aria-label={sel ? 'Deselect' : 'Select'}
+                  aria-pressed={sel}
+                >
+                  {sel && <Icon name="check" size={12} strokeWidth={3} />}
+                </button>
                 {isImage ? (
-                  <img className="cp-file-thumb" src={href} alt={name} loading="lazy" />
+                  <img className="cp-file-thumb" src={href} alt={name} loading="lazy" onClick={() => toggleSel(id)} />
                 ) : (
-                  <div className="cp-file-thumb">
+                  <div className="cp-file-thumb" onClick={() => toggleSel(id)}>
                     <Icon name="file" size={30} />
                   </div>
                 )}

@@ -18,9 +18,24 @@ interface CpFormProps {
   onSaved: (rec: CpRecord) => void
 }
 
+function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 export function CpForm({ spec, initial, onClose, onSaved }: CpFormProps) {
   const { clients, projects, servers, refreshRelations } = useCp()
-  const [form, setForm] = useState<CpRecord>(() => ({ ...(spec.defaults ?? {}), ...(initial ?? {}) }))
+  const [form, setForm] = useState<CpRecord>(() => {
+    const base: CpRecord = { ...(spec.defaults ?? {}) }
+    // prefill "today" defaults only when creating a new record
+    if (!initial?.id) {
+      for (const f of spec.fields) {
+        if (f.defaultToday && base[f.key] == null) base[f.key] = todayStr()
+      }
+    }
+    return { ...base, ...(initial ?? {}) }
+  })
   const [busy, setBusy] = useState(false)
   const editing = !!initial?.id
 

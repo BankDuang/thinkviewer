@@ -30,6 +30,7 @@ const NAV: NavItem[] = [
   { key: 'issues', label: 'Issues / Bugs', icon: 'bug', render: () => <CrudSection spec={CP_SPECS.issues} /> },
   { key: 'change_requests', label: 'Change Requests', icon: 'git-branch', render: () => <CrudSection spec={CP_SPECS.change_requests} /> },
   { key: 'meeting_notes', label: 'Meeting Notes', icon: 'clipboard', render: () => <CrudSection spec={CP_SPECS.meeting_notes} /> },
+  { key: 'notes', label: 'Notes', icon: 'pencil', render: () => <CrudSection spec={CP_SPECS.notes} /> },
   { key: 'files', label: 'Files', icon: 'folder', render: () => <Files /> },
   { key: 'timeline', label: 'Timeline', icon: 'signal', render: () => <Timeline /> },
   { key: 'payments', label: 'Payments', icon: 'money', render: () => <CrudSection spec={CP_SPECS.payments} /> },

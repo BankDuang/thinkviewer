@@ -24,6 +24,7 @@ export interface CpField {
   relation?: 'clients' | 'projects'
   full?: boolean // span the full form width
   placeholder?: string
+  defaultToday?: boolean // for 'date' fields: prefill today's date when creating
 }
 
 export type CpColType = 'text' | 'badge' | 'money' | 'date' | 'relation' | 'server' | 'bool' | 'check'
@@ -180,8 +181,10 @@ export const CP_SPECS: Record<string, CpSpec> = {
     columns: [
       { key: 'title', label: 'Issue' },
       { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
+      { key: 'page', label: 'Page' },
       { key: 'severity', label: 'Severity', type: 'badge' },
       { key: 'status', label: 'Status', type: 'badge' },
+      { key: 'issue_date', label: 'Reported', type: 'date' },
       { key: 'status', label: 'Fixed', type: 'check', onValue: 'fixed', offValue: 'open' },
       { key: 'client_confirmed', label: 'Confirmed', type: 'check' },
     ],
@@ -190,6 +193,8 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
       { key: 'severity', label: 'Severity', type: 'select', options: ISSUE_SEVERITY },
       { key: 'status', label: 'Status', type: 'select', options: ISSUE_STATUS },
+      { key: 'issue_date', label: 'Issue date', type: 'date', defaultToday: true },
+      { key: 'page', label: 'Page (where it happens)', placeholder: 'e.g. Dashboard, Login, Checkout…' },
       { key: 'assignee', label: 'Assignee' },
       { key: 'fixed_date', label: 'Fixed date', type: 'date' },
       { key: 'client_confirmed', label: 'Client confirmed', type: 'checkbox' },
@@ -302,5 +307,25 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'notes', label: 'Notes', type: 'textarea', full: true },
     ],
     defaults: { paid: '0' },
+  },
+  notes: {
+    entity: 'notes',
+    title: 'Notes',
+    singular: 'Note',
+    icon: 'clipboard',
+    titleField: 'title',
+    columns: [
+      { key: 'pinned', label: 'Pinned', type: 'check' },
+      { key: 'title', label: 'Note' },
+      { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
+    ],
+    fields: [
+      { key: 'title', label: 'Title' },
+      { key: 'project_id', label: 'Project', type: 'relation', relation: 'projects' },
+      { key: 'pinned', label: 'Pin to top', type: 'checkbox' },
+      { key: 'body', label: 'Note', type: 'textarea', full: true },
+      { key: 'attachments', label: 'Images', type: 'images', full: true },
+    ],
+    defaults: { pinned: '0' },
   },
 }

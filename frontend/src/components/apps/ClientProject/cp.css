@@ -179,6 +179,77 @@
   color: #5f5f6a;
 }
 
+/* ---- clickable rows + inline detail panel ---- */
+.cp-row-click {
+  cursor: pointer;
+}
+.cp-row-click.is-expanded {
+  background: rgba(94, 154, 255, 0.08);
+}
+.cp-row-click.is-expanded td {
+  border-bottom-color: transparent;
+}
+.cp-row-caret {
+  color: #6a6a76;
+  margin-right: 2px;
+  transition: transform 0.16s ease;
+  vertical-align: middle;
+}
+.cp-rdetail-row > td {
+  padding: 0 12px 14px;
+  background: rgba(94, 154, 255, 0.05);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.cp-rdetail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 2px 2px;
+}
+.cp-rdetail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 18px;
+}
+.cp-rdetail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cp-rdetail-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a7a86;
+}
+.cp-rdetail-value {
+  font-size: 12.5px;
+  color: #e3e3ea;
+  word-break: break-word;
+}
+.cp-rdetail-block-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #7a7a86;
+  margin-bottom: 5px;
+}
+.cp-rdetail-block .cp-prose {
+  font-size: 13px;
+  color: #d2d2da;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.cp-rdetail-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.cp-rdetail-empty {
+  font-size: 12.5px;
+  font-style: italic;
+}
+
 /* ---- badges ---- */
 .cp-badge {
   display: inline-block;
@@ -410,12 +481,18 @@ select.cp-input {
   gap: 12px;
 }
 .cp-file {
+  position: relative;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.cp-file.is-sel {
+  border-color: rgba(94, 154, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(94, 154, 255, 0.55) inset;
 }
 .cp-file-thumb {
   height: 92px;
@@ -426,6 +503,35 @@ select.cp-input {
   color: #6a6a76;
   object-fit: cover;
   width: 100%;
+  cursor: pointer;
+}
+/* selection checkbox overlaid on each file card */
+.cp-file-check {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 2;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(3px);
+  opacity: 0.55;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.cp-file:hover .cp-file-check {
+  opacity: 1;
+}
+.cp-file-check.is-on {
+  opacity: 1;
+  background: #3b7bff;
+  border-color: #3b7bff;
 }
 .cp-file-meta {
   padding: 8px 10px;
@@ -689,6 +795,38 @@ select.cp-input {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ---- bulk-select toolbar (Files) ---- */
+.cp-sel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 3px 4px 3px 12px;
+  border-radius: 9px;
+  background: rgba(94, 154, 255, 0.12);
+  border: 1px solid rgba(94, 154, 255, 0.3);
+}
+.cp-sel-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfe0ff;
+  white-space: nowrap;
+}
+.cp-sel-del {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 69, 58, 0.16) !important;
+  border-color: rgba(255, 69, 58, 0.5) !important;
+  color: #ff8b82 !important;
+}
+.cp-sel-del:hover {
+  background: rgba(255, 69, 58, 0.28) !important;
+  color: #ffb0a8 !important;
 }
 .cp-prose {
   font-size: 13px;
@@ -755,6 +893,18 @@ select.cp-input {
   flex: 1;
   font-size: 13px;
   color: #e9e9ee;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.cp-req-feature:hover {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .cp-req-item.is-done .cp-req-feature {
   text-decoration: line-through;
@@ -927,6 +1077,11 @@ select.cp-input {
   border-color: #0a84ff;
   background: rgba(10, 132, 255, 0.12);
   color: #e9e9ee;
+}
+.cp-dropzone:focus-visible {
+  outline: none;
+  border-color: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.25);
 }
 .cp-thumbs {
   display: flex;

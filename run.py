@@ -121,7 +121,8 @@ CP_ENTITIES = {
     "tasks": ["project_id", "phase_id", "title", "description", "assignee", "status",
               "priority", "due_date", "attachments"],
     "issues": ["project_id", "title", "description", "severity", "status", "assignee",
-               "resolution", "fixed_date", "client_confirmed", "attachments", "fixes"],
+               "resolution", "issue_date", "page", "fixed_date", "client_confirmed",
+               "attachments", "fixes"],
     "change_requests": ["project_id", "title", "description", "impact_scope",
                         "impact_timeline", "impact_budget", "man_days", "status",
                         "approved_by", "approved_date"],
@@ -131,6 +132,7 @@ CP_ENTITIES = {
                      "in_scope", "wireframe", "conditions", "checklist", "order_idx"],
     "payments": ["client_id", "project_id", "title", "invoice_no", "amount",
                  "due_date", "paid", "paid_date", "installment", "notes"],
+    "notes": ["project_id", "client_id", "title", "body", "attachments", "pinned"],
     "activity": ["project_id", "client_id", "kind", "message"],
     "files": ["project_id", "client_id", "issue_id", "name", "path", "category", "notes"],
 }
@@ -141,6 +143,7 @@ CP_JSON = {
     "issues": {"attachments", "fixes"},
     "meeting_notes": {"action_items"},
     "requirements": {"checklist"},
+    "notes": {"attachments"},
 }
 
 pyautogui.FAILSAFE = False
@@ -2987,6 +2990,43 @@ def _cp_clean(entity, key, value):
     return value
 
 
+def _cp_file_in_use(conn, path):
+    """True if `path` is still referenced by an issue/task/note image attachment
+    (or an issue fix-version image). Such files are uploaded via /api/cp/upload —
+    which creates BOTH a cp_files row and stores the path in the parent record's
+    JSON `attachments`/`fixes` column — so deleting the cp_files row must NOT
+    physically remove bytes the parent still points at."""
+    p = str(path)
+    for tbl, col in (("cp_issues", "attachments"), ("cp_tasks", "attachments"),
+                     ("cp_notes", "attachments")):
+        try:
+            for (val,) in conn.execute(f"SELECT {col} FROM {tbl}"):
+                if not val:
+                    continue
+                try:
+                    arr = json.loads(val)
+                except Exception:
+                    continue
+                if isinstance(arr, list) and p in arr:
+                    return True
+        except sqlite3.OperationalError:
+            pass
+    try:  # fix versions: [{note, images:[...], ...}]
+        for (val,) in conn.execute("SELECT fixes FROM cp_issues"):
+            if not val:
+                continue
+            try:
+                arr = json.loads(val)
+            except Exception:
+                continue
+            for v in (arr if isinstance(arr, list) else []):
+                if isinstance(v, dict) and p in (v.get("images") or []):
+                    return True
+    except sqlite3.OperationalError:
+        pass
+    return False
+
+
 def _cp_log(entity, action, data):
     """Auto-append a timeline entry for create/update/delete of CRM records."""
     if entity == "activity":
@@ -3106,7 +3146,10 @@ async def cp_list(entity: str, request: Request):
         sql = f"SELECT * FROM cp_{entity}"
         if filters:
             sql += " WHERE " + " AND ".join(f"{k}=?" for k in filters)
-        sql += " ORDER BY CAST(order_idx AS INTEGER), created_at" if "order_idx" in cols else " ORDER BY created_at DESC"
+        order = "CAST(order_idx AS INTEGER), created_at" if "order_idx" in cols else "created_at DESC"
+        if "pinned" in cols:  # pinned rows (e.g. notes) float to the top
+            order = "CASE WHEN pinned IN ('1','true','True') THEN 0 ELSE 1 END, " + order
+        sql += " ORDER BY " + order
         rows = conn.execute(sql, tuple(filters.values())).fetchall()
         conn.close()
         return [_cp_to_dict(entity, r) for r in rows]
@@ -3195,6 +3238,19 @@ async def cp_delete(entity: str, rid: str, request: Request):
         d = dict(row)
         conn.execute(f"DELETE FROM cp_{entity} WHERE id=?", (rid,))
         conn.commit()
+        # deleting a file record reclaims its bytes on disk too — but only inside
+        # CP_FILES_DIR (never a path that escaped the store) AND only when no
+        # issue/task/note attachment still references it (shared file lifecycle).
+        if entity == "files" and d.get("path"):
+            try:
+                real = os.path.realpath(str(d["path"]))
+                base = os.path.realpath(CP_FILES_DIR)
+                if (os.path.commonpath([real, base]) == base
+                        and os.path.isfile(real)
+                        and not _cp_file_in_use(conn, d["path"])):
+                    os.remove(real)
+            except (OSError, ValueError):
+                pass
         conn.close()
         _cp_log(entity, "deleted", d)
         return True
