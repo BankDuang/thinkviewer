@@ -1,0 +1,67 @@
+import { create } from 'zustand'
+import type { Wallpaper } from '@/types'
+import * as api from '@/lib/restClient'
+import { notify } from './notificationStore'
+
+const DEFAULT_WALLPAPER = 'wp-aurora-blue.png'
+const urlFor = (id: string) => `/static/wallpapers/${id}`
+
+interface DesktopState {
+  wallpaperId: string | null
+  wallpaperUrl: string
+  wallpapers: Wallpaper[]
+  loading: boolean
+  loadWallpapers: () => Promise<void>
+  setWallpaper: (id: string) => Promise<void>
+  addUploaded: (wp: Wallpaper) => void
+  removeWallpaper: (id: string) => Promise<void>
+}
+
+export const useDesktopStore = create<DesktopState>((set, get) => ({
+  wallpaperId: null,
+  wallpaperUrl: urlFor(DEFAULT_WALLPAPER),
+  wallpapers: [],
+  loading: false,
+
+  async loadWallpapers() {
+    set({ loading: true })
+    try {
+      const { selected, wallpapers } = await api.getWallpapers()
+      const id = selected || DEFAULT_WALLPAPER
+      set({
+        wallpapers: wallpapers.filter((w) => w.id !== 'login-bg.png'),
+        wallpaperId: id,
+        wallpaperUrl: urlFor(id),
+      })
+    } catch {
+      /* keep default */
+    } finally {
+      set({ loading: false })
+    }
+  },
+
+  async setWallpaper(id) {
+    const prev = get().wallpaperId
+    set({ wallpaperId: id, wallpaperUrl: urlFor(id) }) // optimistic crossfade
+    try {
+      await api.selectWallpaper(id)
+    } catch {
+      set({ wallpaperId: prev, wallpaperUrl: urlFor(prev || DEFAULT_WALLPAPER) })
+      notify('error', 'Could not change wallpaper')
+    }
+  },
+
+  addUploaded(wp) {
+    set({ wallpapers: [...get().wallpapers, wp] })
+  },
+
+  async removeWallpaper(id) {
+    try {
+      await api.deleteWallpaper(id)
+      set({ wallpapers: get().wallpapers.filter((w) => w.id !== id) })
+      if (get().wallpaperId === id) await get().setWallpaper(DEFAULT_WALLPAPER)
+    } catch {
+      notify('error', 'Could not delete wallpaper')
+    }
+  },
+}))

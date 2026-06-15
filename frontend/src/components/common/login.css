@@ -1,0 +1,105 @@
+.login {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+}
+.login::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.login-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 0 24px;
+}
+.login-logo {
+  width: 108px;
+  height: 108px;
+  filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.55));
+}
+.login-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.login-title {
+  font-size: 21px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+}
+.login-sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: -6px;
+}
+.login-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.login-input {
+  width: 240px;
+  padding: 10px 16px;
+  border-radius: var(--r-pill);
+  font-size: 14px;
+  text-align: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  outline: none;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
+}
+.login-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+.login-input:focus {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+.login-go {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  transition: background var(--dur-fast), transform var(--dur-fast);
+}
+.login-go:hover {
+  background: var(--accent);
+}
+.login-go:active {
+  transform: scale(0.92);
+}
+.login-error {
+  font-size: 12.5px;
+  color: #ffd2d2;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  min-height: 16px;
+}
+.shake {
+  animation: tv-shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes tv-shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-8px); }
+  40%, 60% { transform: translateX(8px); }
+}

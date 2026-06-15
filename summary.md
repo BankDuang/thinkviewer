@@ -26,7 +26,7 @@ Browser (SPA)  <--WebSocket-->  FastAPI Server (port 19080)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `main.py` | ~1020 | FastAPI server, screen capture, input handling, PTY terminal, file API, auth |
+| `run.py` | ~1020 | FastAPI server, screen capture, input handling, PTY terminal, file API, auth |
 | `static/js/app.js` | ~1810 | SPA client: desktop viewer, terminal tabs, file manager, settings |
 | `templates/index.html` | ~478 | Single HTML template with all pages (login, desktop, terminal, files, settings) |
 | `static/css/style.css` | ~1750 | Dark theme, responsive (desktop/tablet/mobile), xterm styling |
@@ -104,7 +104,7 @@ On WebSocket reconnect, client requests `term_list`, then `term_subscribe` for e
 
 ```bash
 pip install -r requirements.txt
-python main.py
+python run.py
 # Open http://localhost:19080
 ```
 

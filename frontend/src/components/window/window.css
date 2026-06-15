@@ -1,0 +1,106 @@
+.win {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
+  background: var(--window-bg);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-win);
+  overflow: hidden;
+  contain: layout size;
+}
+.win.is-blurred {
+  box-shadow: 0 18px 48px -16px rgba(0, 0, 0, 0.5);
+}
+
+.win-titlebar {
+  flex: 0 0 auto;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--titlebar-bg);
+  border-bottom: 1px solid var(--hairline);
+  cursor: default;
+  user-select: none;
+}
+.win-title {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.win.is-focused .win-title {
+  color: var(--text);
+}
+.win-titlebar-spacer {
+  width: 54px;
+  flex: 0 0 auto;
+}
+
+.win-content {
+  flex: 1 1 auto;
+  position: relative;
+  min-height: 0;
+  background: var(--content-bg);
+  overflow: hidden;
+}
+
+/* Traffic lights */
+.tl {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 54px;
+}
+.tl-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: rgba(0, 0, 0, 0.5);
+  opacity: 0.95;
+  transition: filter var(--dur-fast);
+}
+.tl-dot > svg {
+  opacity: 0;
+  transition: opacity var(--dur-fast);
+}
+.tl:hover .tl-dot > svg {
+  opacity: 1;
+}
+.tl-close {
+  background: var(--tl-close);
+}
+.tl-min {
+  background: var(--tl-min);
+}
+.tl-max {
+  background: var(--tl-max);
+}
+.win:not(.is-focused) .tl-dot {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* Resize handles */
+.win-resize {
+  position: absolute;
+  z-index: 5;
+}
+.rz-n { top: -3px; left: 8px; right: 8px; height: 7px; cursor: ns-resize; }
+.rz-s { bottom: -3px; left: 8px; right: 8px; height: 7px; cursor: ns-resize; }
+.rz-e { right: -3px; top: 8px; bottom: 8px; width: 7px; cursor: ew-resize; }
+.rz-w { left: -3px; top: 8px; bottom: 8px; width: 7px; cursor: ew-resize; }
+.rz-ne { top: -4px; right: -4px; width: 14px; height: 14px; cursor: nesw-resize; }
+.rz-nw { top: -4px; left: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.rz-se { bottom: -4px; right: -4px; width: 14px; height: 14px; cursor: nwse-resize; }
+.rz-sw { bottom: -4px; left: -4px; width: 14px; height: 14px; cursor: nesw-resize; }

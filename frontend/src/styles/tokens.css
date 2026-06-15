@@ -1,0 +1,81 @@
+/* ============================================================
+   ThinkViewer design tokens — macOS-inspired, vibrancy/glass.
+   Dark is the default; [data-theme="light"] flips the surfaces.
+   ============================================================ */
+:root {
+  /* Brand / accent */
+  --accent: #0a84ff;
+  --accent-2: #5e5ce6;
+  --accent-grad: linear-gradient(135deg, #0a84ff 0%, #5e5ce6 100%);
+  --accent-soft: rgba(10, 132, 255, 0.16);
+
+  /* Traffic lights */
+  --tl-close: #ff5f57;
+  --tl-min: #febc2e;
+  --tl-max: #28c840;
+
+  /* Typography */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, Monaco, 'Cascadia Code',
+    monospace;
+
+  /* Radii */
+  --r-sm: 7px;
+  --r-md: 11px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-pill: 999px;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 0.14s;
+  --dur: 0.26s;
+
+  /* ---- Dark surfaces (default) ---- */
+  --text: #f2f3f7;
+  --text-dim: rgba(235, 238, 245, 0.62);
+  --text-faint: rgba(235, 238, 245, 0.38);
+
+  --window-bg: rgba(32, 33, 40, 0.78);
+  --window-solid: #202128;
+  --titlebar-bg: rgba(46, 47, 56, 0.72);
+  --content-bg: rgba(24, 25, 31, 0.92);
+
+  --glass-bg: rgba(38, 39, 48, 0.55);
+  --glass-strong: rgba(28, 29, 36, 0.74);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --hairline: rgba(255, 255, 255, 0.08);
+
+  --hover: rgba(255, 255, 255, 0.08);
+  --active: rgba(255, 255, 255, 0.14);
+  --field-bg: rgba(255, 255, 255, 0.06);
+
+  --shadow-win: 0 28px 70px -12px rgba(0, 0, 0, 0.62), 0 6px 18px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --blur: saturate(180%) blur(28px);
+}
+
+[data-theme='light'] {
+  --text: #1d1d1f;
+  --text-dim: rgba(30, 30, 35, 0.6);
+  --text-faint: rgba(30, 30, 35, 0.4);
+
+  --window-bg: rgba(250, 250, 252, 0.82);
+  --window-solid: #f6f6f8;
+  --titlebar-bg: rgba(244, 244, 247, 0.8);
+  --content-bg: rgba(255, 255, 255, 0.92);
+
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(248, 248, 251, 0.82);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --hairline: rgba(0, 0, 0, 0.08);
+
+  --hover: rgba(0, 0, 0, 0.05);
+  --active: rgba(0, 0, 0, 0.09);
+  --field-bg: rgba(0, 0, 0, 0.05);
+
+  --shadow-win: 0 28px 64px -14px rgba(0, 0, 0, 0.34), 0 4px 14px rgba(0, 0, 0, 0.16);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.2);
+}

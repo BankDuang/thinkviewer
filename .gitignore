@@ -7,7 +7,6 @@ thinkviewer.db
 
 # Node
 node_modules/
-package-lock.json
 
 # OS
 .DS_Store
@@ -19,3 +18,23 @@ uploads/
 # Allow screenshots folder
 !screenshots/
 !screenshots/*.png
+
+# Built-in macOS wallpaper assets (override *.png above)
+!static/wallpapers/
+!static/wallpapers/*.png
+
+# Brand assets (logo) — override *.png above
+!static/brand/
+!static/brand/*.png
+
+# Runtime logs (managed-server output, deploy logs, server run output)
+server_logs/
+*.log
+
+# Committed frontend build artifact (so the auto-updater always ships a working bundle)
+!frontend/dist/
+!frontend/dist/**
+
+# Frontend local env (never commit secrets to the client)
+frontend/.env
+frontend/.env.*
