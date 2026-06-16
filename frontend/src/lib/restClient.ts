@@ -17,6 +17,7 @@ import type {
   LoginResp,
   ManagedService,
   ManagedUser,
+  Note,
   ReachabilityResp,
   Role,
   ServersResp,
@@ -113,6 +114,7 @@ export function logout(): Promise<{ success: boolean }> {
 // --- Device / settings (Bearer) -------------------------------------------
 export const getInfo = () => bearerJson<DeviceInfo>('GET', '/api/info')
 export const getStats = () => bearerJson<SystemStats>('GET', '/api/stats')
+export const getPublicIp = () => bearerJson<{ ip: string | null }>('GET', '/api/public-ip')
 export const getMe = () => bearerJson<User>('GET', '/api/me')
 
 // --- Users (admin-only management; Bearer) ---------------------------------
@@ -298,4 +300,19 @@ export function cpUpload(
   fd.append('token', _token ?? '')
   for (const [k, v] of Object.entries(meta)) if (v) fd.append(k, v)
   return fetch('/api/cp/upload', { method: 'POST', body: fd }).then((r) => parse<CpRecord>(r))
+}
+
+// --- Notes app ---
+export const listNotes = () => bearerJson<{ items: Note[] }>('GET', '/api/notes')
+export const createNote = (n: Partial<Note>) => bearerJson<Note>('POST', '/api/notes', n)
+export const updateNote = (id: string, n: Partial<Note>) =>
+  bearerJson<Note>('PUT', `/api/notes/${id}`, n)
+export const deleteNote = (id: string) => bearerJson<{ success: boolean }>('DELETE', `/api/notes/${id}`)
+export function uploadNoteImage(file: File): Promise<{ path: string; name: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  fd.append('token', _token ?? '')
+  return fetch('/api/notes/upload', { method: 'POST', body: fd }).then((r) =>
+    parse<{ path: string; name: string }>(r),
+  )
 }

@@ -66,6 +66,26 @@
   align-items: center;
   gap: 6px;
 }
+.menubar-ip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.menubar-ip:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+.menubar-ip-addr {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
 .mb-stats {
   display: flex;
   align-items: center;

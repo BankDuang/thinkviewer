@@ -1,6 +1,6 @@
 // Window-manager + app-registry types.
 
-export type AppKind = 'remote' | 'terminal' | 'files' | 'settings' | 'servers' | 'clientproject'
+export type AppKind = 'remote' | 'terminal' | 'files' | 'settings' | 'servers' | 'clientproject' | 'notes'
 
 export interface Rect {
   x: number

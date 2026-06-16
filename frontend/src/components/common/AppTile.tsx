@@ -67,6 +67,17 @@ const TILES: Record<AppKind, TileDef> = {
       </g>
     ),
   },
+  notes: {
+    from: '#ffd95e',
+    to: '#f4b423',
+    glyph: (
+      <g fill="none" stroke="#7a4d05" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 15h24v19l-6 7H16z" fill="#fff" stroke="none" opacity="0.96" />
+        <path d="M34 41v-7h7" />
+        <path d="M21 23h14M21 28h14M21 33h7" />
+      </g>
+    ),
+  },
   clientproject: {
     from: '#b07cff',
     to: '#6d28d9',

@@ -6,6 +6,7 @@ import { FilesApp } from '@/components/apps/Files/FilesApp'
 import { SettingsApp } from '@/components/apps/Settings/SettingsApp'
 import { ServersApp } from '@/components/apps/Servers/ServersApp'
 import { ClientProjectApp } from '@/components/apps/ClientProject/ClientProjectApp'
+import { NotesApp } from '@/components/apps/Notes/NotesApp'
 
 export interface AppDef {
   kind: AppKind
@@ -58,11 +59,18 @@ export const APP_REGISTRY: Record<AppKind, AppDef> = {
     singleton: true,
     Component: ClientProjectApp,
   },
+  notes: {
+    kind: 'notes',
+    title: 'Notes',
+    defaultSize: { w: 900, h: 640 },
+    singleton: true,
+    Component: NotesApp,
+  },
 }
 
 // Order shown on the desktop grid and in the dock.
 export const APP_ORDER: AppKind[] = [
-  'remote', 'terminal', 'files', 'settings', 'servers', 'clientproject',
+  'remote', 'terminal', 'files', 'settings', 'servers', 'clientproject', 'notes',
 ]
 
 /** Apps the current user may see: admins see everything, others only what the

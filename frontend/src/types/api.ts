@@ -185,6 +185,23 @@ export interface SetupLog {
   log: string
 }
 
+// --- Notes app (standalone) ---
+export interface NoteChecklistItem {
+  text: string
+  done: boolean
+}
+export interface Note {
+  id: string
+  title: string
+  body: string
+  checklist: NoteChecklistItem[]
+  images: string[]
+  pinned: string // '0' | '1'
+  color: string
+  created_at: string
+  updated_at: string
+}
+
 // --- Client Project (CRM) — generic records keyed by the entity's columns ---
 export type CpRecord = Record<string, any>
 
