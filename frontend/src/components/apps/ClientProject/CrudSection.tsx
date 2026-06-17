@@ -8,6 +8,8 @@ import { Icon } from '@/components/common/Icon'
 import { useCp } from './CpContext'
 import { CpTable } from './CpTable'
 import { CpForm } from './CpForm'
+import { ProgressRing } from './Charts'
+import { usePoll } from './usePoll'
 import type { CpSpec } from './specs'
 
 interface CrudSectionProps {
@@ -29,17 +31,27 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
   const [editing, setEditing] = useState<Editing>(undefined)
 
   const filterKey = JSON.stringify(fixedFilter ?? null)
-  const load = useCallback(() => {
-    setLoading(true)
-    api
-      .cpList(spec.entity, fixedFilter)
-      .then((r) => setRows(r.items))
-      .catch((e) => notify('error', e instanceof api.ApiError ? e.message : 'Could not load'))
-      .finally(() => setLoading(false))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [spec.entity, filterKey])
+  const load = useCallback(
+    (silent = false) => {
+      if (!silent) setLoading(true)
+      api
+        .cpList(spec.entity, fixedFilter)
+        // on a silent background refresh, only swap rows when they actually
+        // changed → unchanged polls cause zero re-render (no flicker)
+        .then((r) => setRows((prev) => (silent && JSON.stringify(prev) === JSON.stringify(r.items) ? prev : r.items)))
+        .catch((e) => {
+          if (!silent) notify('error', e instanceof api.ApiError ? e.message : 'Could not load')
+        })
+        .finally(() => {
+          if (!silent) setLoading(false)
+        })
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [spec.entity, filterKey],
+  )
 
   useEffect(() => load(), [load])
+  usePoll(() => load(true)) // flicker-free background sync (multi-user)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -63,7 +75,7 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
         await api.cpDelete(spec.entity, String(rec.id))
         notify('ok', `Deleted “${label}”`)
         if (spec.entity === 'clients' || spec.entity === 'projects') refreshRelations()
-        load()
+        load(true) // silent → keeps scroll/sort position (no jump to top)
         onChange?.()
       } catch (e) {
         notify('error', e instanceof api.ApiError ? e.message : 'Could not delete')
@@ -86,6 +98,13 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
     [spec.entity, load, onChange],
   )
 
+  // completion % over ALL rows of the section (not the search-filtered view)
+  const prog = useMemo(() => {
+    if (!spec.progress || rows.length === 0) return null
+    const done = rows.filter(spec.progress.done).length
+    return { done, total: rows.length, pct: Math.round((done / rows.length) * 100), label: spec.progress.label }
+  }, [rows, spec.progress])
+
   return (
     <div className="cp-section">
       <div className="cp-section-head">
@@ -93,6 +112,14 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
           <Icon name={spec.icon as never} size={18} />
           <span>{spec.title}</span>
           <span className="cp-count">{filtered.length}</span>
+          {prog && (
+            <span className="cp-section-progress" title={`${prog.done}/${prog.total} ${prog.label}`}>
+              <ProgressRing value={prog.pct} size={30} stroke={4} color={prog.pct >= 100 ? '#30d158' : '#0a84ff'} />
+              <span className="cp-section-progress-text">
+                {prog.pct}% {prog.label}
+              </span>
+            </span>
+          )}
         </div>
         <div className="cp-section-actions">
           <div className="cp-search">
@@ -104,7 +131,7 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <button className="tv-btn" onClick={load} title="Refresh" aria-label="Refresh">
+          <button className="tv-btn" onClick={() => load()} title="Refresh" aria-label="Refresh">
             <Icon name="refresh" size={14} className={loading ? 'spin' : undefined} />
           </button>
           <button className="tv-btn tv-btn--primary" onClick={() => setEditing(null)}>
@@ -122,6 +149,7 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
         <CpTable
           spec={spec}
           rows={filtered}
+          hideProject={!!fixedFilter?.project_id}
           onEdit={(r) => setEditing(r)}
           onDelete={(r) => void onDelete(r)}
           onToggle={(rec, col, next) => void onToggle(rec, col, next)}
@@ -135,7 +163,7 @@ export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
             initial={editing ?? { ...(fixedFilter ?? {}) }}
             onClose={() => setEditing(undefined)}
             onSaved={() => {
-              load()
+              load(true) // silent → row stays in place after edit (no jump to top)
               onChange?.()
             }}
           />

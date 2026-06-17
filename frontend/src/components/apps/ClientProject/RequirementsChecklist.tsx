@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { CpRecord } from '@/types'
 import * as api from '@/lib/restClient'
@@ -6,6 +6,7 @@ import { notify } from '@/store/notificationStore'
 import { confirmDialog } from '@/store/dialogStore'
 import { Icon } from '@/components/common/Icon'
 import { cpBadgeClass, cpLabel } from './cpFormat'
+import { usePoll } from './usePoll'
 
 interface ChecklistItem {
   text: string
@@ -30,17 +31,30 @@ export function RequirementsChecklist({
   const [itemText, setItemText] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    setLoading(true)
-    api
-      .cpList('requirements', { project_id: projectId })
-      .then((r) => setReqs(r.items))
-      .finally(() => setLoading(false))
-  }, [projectId])
+  const reqSig = useRef('')
+  const load = useCallback(
+    (silent = false) => {
+      if (!silent) setLoading(true)
+      api
+        .cpList('requirements', { project_id: projectId })
+        .then((r) => {
+          const sig = JSON.stringify(r.items)
+          if (silent && sig === reqSig.current) return // unchanged → no re-render
+          reqSig.current = sig
+          setReqs(r.items)
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!silent) setLoading(false)
+        })
+    },
+    [projectId],
+  )
   useEffect(() => load(), [load])
+  usePoll(() => load(true)) // flicker-free multi-user sync
 
   const after = () => {
-    load()
+    load(true) // refresh silently after a local mutation (no spinner flash)
     onChange?.()
   }
 
@@ -105,7 +119,7 @@ export function RequirementsChecklist({
     } catch {
       notify('error', 'Could not save the new order')
     }
-    load()
+    load(true)
   }
 
   const total = reqs.length

@@ -93,6 +93,19 @@
   padding: 1px 8px;
   border-radius: 10px;
 }
+/* completion ring + % in a section header */
+.cp-section-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+.cp-section-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #9a9aa6;
+  letter-spacing: 0.01em;
+}
 .cp-section-actions {
   display: flex;
   align-items: center;
@@ -139,6 +152,20 @@
   padding: 9px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.2);
+}
+.cp-th-sort {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.cp-th-sort:hover {
+  color: #d2d2da;
+}
+.cp-sort-caret {
+  vertical-align: middle;
+  margin-left: 3px;
+  color: #0a84ff;
+  transition: transform 0.15s ease;
 }
 .cp-table td {
   padding: 9px 12px;

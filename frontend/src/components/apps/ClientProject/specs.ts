@@ -1,6 +1,7 @@
 // Field-spec config that drives the generic CRM table + form. Each entity
 // declares its list columns and its form fields; CpTable / CpForm / CrudSection
 // render everything from this, so a section is just <CrudSection spec={...} />.
+import { issueDone } from './cpFormat'
 
 export type CpFieldType =
   | 'text'
@@ -48,7 +49,12 @@ export interface CpSpec {
   columns: CpColumn[]
   fields: CpField[]
   defaults?: Record<string, unknown>
+  /** when set, the section header shows a completion ring (% of rows "done") */
+  progress?: { label: string; done: (r: Record<string, any>) => boolean }
 }
+
+// truthy check for the '1'/'0'/bool flags stored as strings
+const yes = (v: unknown) => v === '1' || v === 1 || v === true || v === 'true'
 
 export const CLIENT_STATUS = ['lead', 'active', 'inactive', 'done']
 export const PROJECT_STATUS = ['planning', 'active', 'on_hold', 'delivered', 'maintenance', 'cancelled']
@@ -144,6 +150,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'notes', label: 'Notes', type: 'textarea', full: true },
     ],
     defaults: { status: 'not_started' },
+    progress: { label: 'done', done: (r) => String(r.status) === 'done' },
   },
   tasks: {
     entity: 'tasks',
@@ -171,6 +178,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'attachments', label: 'Images', type: 'images', full: true },
     ],
     defaults: { status: 'todo', priority: 'medium' },
+    progress: { label: 'done', done: (r) => String(r.status) === 'done' },
   },
   issues: {
     entity: 'issues',
@@ -204,6 +212,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'fixes', label: 'Fix versions (in case it isn’t fixed yet)', type: 'versions', full: true },
     ],
     defaults: { severity: 'medium', status: 'open' },
+    progress: { label: 'passed', done: issueDone },
   },
   change_requests: {
     entity: 'change_requests',
@@ -231,6 +240,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'description', label: 'Description', type: 'textarea', full: true },
     ],
     defaults: { status: 'requested' },
+    progress: { label: 'done', done: (r) => String(r.status) === 'done' },
   },
   meeting_notes: {
     entity: 'meeting_notes',
@@ -279,6 +289,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'conditions', label: 'Acceptance conditions', type: 'textarea', full: true },
     ],
     defaults: { priority: 'medium', status: 'proposed', in_scope: '1' },
+    progress: { label: 'done', done: (r) => String(r.status) === 'done' },
   },
   payments: {
     entity: 'payments',
@@ -307,6 +318,7 @@ export const CP_SPECS: Record<string, CpSpec> = {
       { key: 'notes', label: 'Notes', type: 'textarea', full: true },
     ],
     defaults: { paid: '0' },
+    progress: { label: 'paid', done: (r) => yes(r.paid) },
   },
   notes: {
     entity: 'notes',

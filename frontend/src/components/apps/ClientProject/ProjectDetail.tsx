@@ -12,7 +12,8 @@ import { CrudSection } from './CrudSection'
 import { RequirementsChecklist } from './RequirementsChecklist'
 import { ProgressRing } from './Charts'
 import { CP_SPECS } from './specs'
-import { cpBadgeClass, cpDate, cpLabel, cpMoney, cpProgress } from './cpFormat'
+import { usePoll } from './usePoll'
+import { cpBadgeClass, cpDate, cpLabel, cpMoney, cpProgress, issueDone } from './cpFormat'
 
 const TABS: { key: string; label: string; icon: IconName }[] = [
   { key: 'overview', label: 'Overview', icon: 'grid' },
@@ -198,6 +199,7 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
   const [tab, setTab] = useState('overview')
   const [editing, setEditing] = useState(false)
 
+  const headSig = useRef('')
   const loadHead = useCallback(() => {
     Promise.all([
       api.cpList('projects', { id: projectId }),
@@ -207,6 +209,10 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
       api.cpList('change_requests', { project_id: projectId }),
     ])
       .then(([p, t, r, i, c]) => {
+        // skip all state updates when nothing changed → idle polls don't re-render
+        const sig = JSON.stringify([p.items[0] ?? null, t.items, r.items, i.items, c.items])
+        if (sig === headSig.current) return
+        headSig.current = sig
         setProject(p.items[0] ?? null)
         setTasks(t.items)
         setReqs(r.items)
@@ -216,10 +222,11 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
       .catch(() => {})
   }, [projectId])
   useEffect(() => loadHead(), [loadHead])
+  usePoll(loadHead) // keep the hero + tab badges synced across users
 
   const progress = cpProgress(tasks, reqs)
   const clientName = String(clients.find((c) => String(c.id) === String(project?.client_id))?.name ?? '—')
-  const openIssues = issues.filter((x) => !['verified', 'closed'].includes(String(x.status))).length
+  const openIssues = issues.filter((x) => !issueDone(x)).length // not yet fixed & confirmed
   // count of not-yet-done cases per tab (shown as a highlighted badge)
   const tabOpen: Record<string, number> = {
     requirements: reqs.filter((r) => String(r.status) !== 'done').length,

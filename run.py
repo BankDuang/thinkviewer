@@ -134,7 +134,7 @@ CP_ENTITIES = {
     "payments": ["client_id", "project_id", "title", "invoice_no", "amount",
                  "due_date", "paid", "paid_date", "installment", "notes"],
     "notes": ["project_id", "client_id", "title", "body", "attachments", "pinned"],
-    "activity": ["project_id", "client_id", "kind", "message"],
+    "activity": ["project_id", "client_id", "kind", "message", "actor"],
     "files": ["project_id", "client_id", "issue_id", "name", "path", "category", "notes"],
 }
 # columns whose values are JSON (encoded on write, decoded on read).
@@ -2830,6 +2830,12 @@ def _require_token(request: Request):
         raise HTTPException(status_code=401)
 
 
+def _actor(request: Request) -> str:
+    """Username behind the request's token, for activity attribution ('' if none)."""
+    u = _user_for_token(request.headers.get("Authorization", "").replace("Bearer ", ""))
+    return u["username"] if u else ""
+
+
 @app.get("/api/servers")
 async def servers_list(request: Request):
     _require_token(request)
@@ -3080,7 +3086,7 @@ def _cp_file_in_use(conn, path):
     return False
 
 
-def _cp_log(entity, action, data):
+def _cp_log(entity, action, data, actor=""):
     """Auto-append a timeline entry for create/update/delete of CRM records."""
     if entity == "activity":
         return
@@ -3090,10 +3096,10 @@ def _cp_log(entity, action, data):
         conn = get_db()
         now = datetime.now().isoformat()
         conn.execute(
-            "INSERT INTO cp_activity (id, project_id, client_id, kind, message, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO cp_activity (id, project_id, client_id, kind, message, actor, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (uuid.uuid4().hex[:8], str(data.get("project_id") or ""),
-             str(data.get("client_id") or ""), entity, msg, now, now))
+             str(data.get("client_id") or ""), entity, msg, actor, now, now))
         conn.commit()
         conn.close()
     except Exception:
@@ -3116,8 +3122,9 @@ async def cp_dashboard(request: Request):
             "projects_total": s("SELECT COUNT(*) FROM cp_projects"),
             "projects_active": s("SELECT COUNT(*) FROM cp_projects WHERE status='active'"),
             "projects_delivered": s("SELECT COUNT(*) FROM cp_projects WHERE status='delivered'"),
-            "issues_open": s("SELECT COUNT(*) FROM cp_issues WHERE status NOT IN ('verified','closed')"),
-            "issues_critical": s("SELECT COUNT(*) FROM cp_issues WHERE severity='critical' AND status NOT IN ('verified','closed')"),
+            # an issue is "done" only when fixed AND client-confirmed; open = the rest
+            "issues_open": s("SELECT COUNT(*) FROM cp_issues WHERE NOT (status IN ('fixed','verified','closed') AND client_confirmed IN ('1','true','True'))"),
+            "issues_critical": s("SELECT COUNT(*) FROM cp_issues WHERE severity='critical' AND NOT (status IN ('fixed','verified','closed') AND client_confirmed IN ('1','true','True'))"),
             "tasks_open": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done')"),
             "tasks_overdue": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done') AND due_date<>'' AND due_date < ?", today),
             "requirements_open": s("SELECT COUNT(*) FROM cp_requirements WHERE status NOT IN ('done')"),
@@ -3130,7 +3137,7 @@ async def cp_dashboard(request: Request):
             "AND deliver_date<>'' AND deliver_date <= ? ORDER BY deliver_date LIMIT 10", (soon,)).fetchall()]
         out["critical_issues"] = [dict(r) for r in conn.execute(
             "SELECT id,project_id,title,severity,status FROM cp_issues "
-            "WHERE severity='critical' AND status NOT IN ('verified','closed') "
+            "WHERE severity='critical' AND NOT (status IN ('fixed','verified','closed') AND client_confirmed IN ('1','true','True')) "
             "ORDER BY created_at DESC LIMIT 10").fetchall()]
         out["recent_activity"] = [dict(r) for r in conn.execute(
             "SELECT * FROM cp_activity ORDER BY created_at DESC LIMIT 15").fetchall()]
@@ -3223,6 +3230,7 @@ async def cp_create(entity: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid request")
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid request")
+    actor = _actor(request)
 
     def work():
         rid = uuid.uuid4().hex[:8]
@@ -3235,7 +3243,7 @@ async def cp_create(entity: str, request: Request):
         conn.commit()
         row = conn.execute(f"SELECT * FROM cp_{entity} WHERE id=?", (rid,)).fetchone()
         conn.close()
-        _cp_log(entity, "created", {**body, "id": rid})
+        _cp_log(entity, "created", {**body, "id": rid}, actor)
         return _cp_to_dict(entity, row)
 
     return await asyncio.to_thread(work)
@@ -3253,6 +3261,7 @@ async def cp_update(entity: str, rid: str, request: Request):
         raise HTTPException(status_code=400, detail="Invalid request")
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid request")
+    actor = _actor(request)
 
     def work():
         data = {k: _cp_clean(entity, k, body[k]) for k in body if k in cols}
@@ -3267,7 +3276,7 @@ async def cp_update(entity: str, rid: str, request: Request):
             conn.commit()
         row = conn.execute(f"SELECT * FROM cp_{entity} WHERE id=?", (rid,)).fetchone()
         conn.close()
-        _cp_log(entity, "updated", {**body, "id": rid})
+        _cp_log(entity, "updated", {**body, "id": rid}, actor)
         return _cp_to_dict(entity, row)
 
     res = await asyncio.to_thread(work)
@@ -3282,6 +3291,7 @@ async def cp_delete(entity: str, rid: str, request: Request):
     cols = CP_ENTITIES.get(entity)
     if cols is None:
         raise HTTPException(status_code=404, detail="Unknown entity")
+    actor = _actor(request)
 
     def work():
         conn = get_db()
@@ -3306,7 +3316,7 @@ async def cp_delete(entity: str, rid: str, request: Request):
             except (OSError, ValueError):
                 pass
         conn.close()
-        _cp_log(entity, "deleted", d)
+        _cp_log(entity, "deleted", d, actor)
         return True
 
     if not await asyncio.to_thread(work):

@@ -38,6 +38,7 @@ export function CpSettings() {
   const [counts, setCounts] = useState<Record<string, number> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [notifyOn, setNotifyOn] = useState(() => localStorage.getItem('cpNotify') !== '0')
 
   useEffect(() => {
     let alive = true
@@ -88,6 +89,35 @@ export function CpSettings() {
           All records are stored locally in the ThinkViewer database — nothing is sent to a third
           party. Each section is a self-contained list you can search, create, edit, and archive.
         </p>
+      </div>
+
+      <div className="cp-panel">
+        <div className="cp-panel-title">
+          <Icon name="signal" size={15} />
+          <span>Notifications</span>
+        </div>
+        <div className="set-toggle-row">
+          <span className="set-toggle-text">
+            <span className="set-toggle-name">Notify when teammates add items</span>
+            <span className="set-toggle-sub">
+              Pop up a toast when another user creates a client, project, task, issue, etc.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={notifyOn}
+            aria-label="Notify when teammates add items"
+            className={`set-switch${notifyOn ? ' is-on' : ''}`}
+            onClick={() => {
+              const v = !notifyOn
+              setNotifyOn(v)
+              localStorage.setItem('cpNotify', v ? '1' : '0')
+            }}
+          >
+            <span className="set-switch-knob" />
+          </button>
+        </div>
       </div>
 
       <div className="cp-panel">

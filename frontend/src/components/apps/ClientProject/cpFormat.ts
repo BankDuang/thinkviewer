@@ -14,6 +14,12 @@ export function cpBool(v: unknown): boolean {
   return v === '1' || v === 1 || v === true || v === 'true'
 }
 
+/** An issue counts as "done/passed" only when it is fixed AND client-confirmed
+ *  (the single source of truth for issue completion across badges + %). */
+export function issueDone(r: Record<string, unknown>): boolean {
+  return cpBool(r.client_confirmed) && ['fixed', 'verified', 'closed'].includes(String(r.status))
+}
+
 /** human label for an enum-ish value: "in_progress" -> "in progress" */
 export function cpLabel(v: unknown): string {
   return String(v ?? '').replace(/_/g, ' ').trim()

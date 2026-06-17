@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { AppProps } from '@/types'
 import * as api from '@/lib/restClient'
+import { notify } from '@/store/notificationStore'
+import { useSessionStore } from '@/store/sessionStore'
 import { Icon, type IconName } from '@/components/common/Icon'
 import { CpProvider } from './CpContext'
 import { CrudSection } from './CrudSection'
 import { ProjectsHub } from './ProjectsHub'
 import { CP_SPECS } from './specs'
+import { usePoll } from './usePoll'
 import { Dashboard } from './views/Dashboard'
 import { Files } from './views/Files'
 import { Timeline } from './views/Timeline'
@@ -45,21 +48,45 @@ export function ClientProjectApp(_props: AppProps) {
 
   // open (not-yet-done) counts per section, shown as highlighted nav badges
   const [open, setOpen] = useState<Record<string, number>>({})
+  const username = useSessionStore((s) => s.user?.username)
+  const seenActivity = useRef<Set<string> | null>(null) // null until baseline captured
+
   const refreshCounts = useCallback(() => {
     api
       .cpDashboard()
-      .then((d) =>
-        setOpen({
+      .then((d) => {
+        const next = {
           requirements: d.requirements_open,
           tasks: d.tasks_open,
           issues: d.issues_open,
           change_requests: d.cr_open,
-        }),
-      )
+        }
+        setOpen((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+
+        // toast when a *teammate* adds something (opt-out in CP Settings).
+        const acts = (d.recent_activity ?? []) as Array<Record<string, unknown>>
+        if (seenActivity.current === null) {
+          seenActivity.current = new Set(acts.map((a) => String(a.id))) // baseline, no toast
+        } else {
+          const enabled = localStorage.getItem('cpNotify') !== '0'
+          for (const a of acts) {
+            const id = String(a.id)
+            if (seenActivity.current.has(id)) continue
+            seenActivity.current.add(id)
+            const msg = String(a.message ?? '')
+            const actor = String(a.actor ?? '')
+            if (enabled && msg.startsWith('created') && actor && actor !== username) {
+              const label = msg.includes(': ') ? msg.split(': ').slice(1).join(': ') : String(a.kind ?? '')
+              notify('info', `${actor} added ${a.kind}: ${label}`)
+            }
+          }
+        }
+      })
       .catch(() => {})
-  }, [])
-  // refresh on mount and whenever the user switches section (cheap COUNT query)
+  }, [username])
+  // refresh on mount, on section switch, and on a background poll (multi-user sync)
   useEffect(() => refreshCounts(), [refreshCounts, active])
+  usePoll(refreshCounts)
 
   return (
     <CpProvider>

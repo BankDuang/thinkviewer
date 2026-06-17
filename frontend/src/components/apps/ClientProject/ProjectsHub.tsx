@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import clsx from 'clsx'
 import type { CpRecord } from '@/types'
@@ -9,8 +9,9 @@ import { useCp } from './CpContext'
 import { CpForm } from './CpForm'
 import { ProjectDetail } from './ProjectDetail'
 import { ProgressRing } from './Charts'
+import { usePoll } from './usePoll'
 import { CP_SPECS } from './specs'
-import { cpBadgeClass, cpDate, cpLabel, cpMoney, cpProgress } from './cpFormat'
+import { cpBadgeClass, cpDate, cpLabel, cpMoney, cpProgress, issueDone } from './cpFormat'
 
 interface Stats {
   progress: number
@@ -90,8 +91,9 @@ export function ProjectsHub() {
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
 
-  const load = useCallback(() => {
-    setLoading(true)
+  const hubSig = useRef('')
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true)
     Promise.all([
       api.cpList('projects'),
       api.cpList('tasks'),
@@ -99,16 +101,26 @@ export function ProjectsHub() {
       api.cpList('issues'),
     ])
       .then(([p, t, r, i]) => {
+        const sig = JSON.stringify([p.items, t.items, r.items, i.items])
+        if (silent && sig === hubSig.current) return // unchanged → no re-render
+        hubSig.current = sig
         setProjects(p.items)
         setTasks(t.items)
         setReqs(r.items)
         setIssues(i.items)
       })
-      .catch((e) => notify('error', e instanceof api.ApiError ? e.message : 'Could not load projects'))
-      .finally(() => setLoading(false))
+      .catch((e) => {
+        if (!silent) notify('error', e instanceof api.ApiError ? e.message : 'Could not load projects')
+      })
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
   }, [])
 
   useEffect(() => load(), [load])
+  usePoll(() => {
+    if (!selected) load(true) // only sync the card grid while it's visible
+  })
 
   const clientName = useCallback(
     (id: unknown) => String(clients.find((c) => String(c.id) === String(id))?.name ?? ''),
@@ -119,9 +131,7 @@ export function ProjectsHub() {
     (pid: string): Stats => {
       const t = tasks.filter((x) => String(x.project_id) === pid)
       const r = reqs.filter((x) => String(x.project_id) === pid)
-      const openIssues = issues.filter(
-        (x) => String(x.project_id) === pid && !['verified', 'closed'].includes(String(x.status)),
-      ).length
+      const openIssues = issues.filter((x) => String(x.project_id) === pid && !issueDone(x)).length
       return {
         progress: cpProgress(t, r),
         tasksDone: t.filter((x) => String(x.status) === 'done').length,
@@ -166,7 +176,7 @@ export function ProjectsHub() {
             <Icon name="search" size={13} />
             <input value={query} placeholder="Search" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <button className="tv-btn" onClick={load} title="Refresh" aria-label="Refresh">
+          <button className="tv-btn" onClick={() => load()} title="Refresh" aria-label="Refresh">
             <Icon name="refresh" size={14} className={loading ? 'spin' : undefined} />
           </button>
           <button className="tv-btn tv-btn--primary" onClick={() => setCreating(true)}>
