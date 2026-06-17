@@ -25,6 +25,14 @@ function ramTone(usedGib: number): string {
   return '#34c759'
 }
 
+// bytes/sec -> compact human rate (B/s, KB/s, MB/s)
+function rate(bps: number | null): string {
+  if (bps == null) return '—'
+  if (bps < 1024) return `${Math.round(bps)} B/s`
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(bps < 10 * 1024 ? 1 : 0)} KB/s`
+  return `${(bps / 1048576).toFixed(1)} MB/s`
+}
+
 function Gauge({ label, percent, value, color }: { label: string; percent: number; value: string; color: string }) {
   return (
     <div className="mb-gauge" title={`${label}: ${value}`}>
@@ -42,7 +50,9 @@ function Gauge({ label, percent, value, color }: { label: string; percent: numbe
 
 export function MenuBarStats() {
   const status = useConnectionStore((s) => s.status)
-  const show = useDesktopStore((s) => s.showMenuStats)
+  const showStats = useDesktopStore((s) => s.showMenuStats)
+  const showNet = useDesktopStore((s) => s.showMenuNet)
+  const show = showStats || showNet
   const [stats, setStats] = useState<SystemStats | null>(null)
   const mounted = useRef(true)
 
@@ -65,16 +75,36 @@ export function MenuBarStats() {
 
   if (!show || status !== 'open' || !stats) return null
   const cpu = stats.cpu ?? 0
-  const memPct = stats.mem_percent ?? 0
+  // bar must reflect the SAME used/total we display in GB (psutil's mem_percent
+  // counts reclaimable/wired memory on macOS, so it diverged from "X/Y GB").
+  const usedGib = gib(stats.mem_used)
+  const totalGib = gib(stats.mem_total)
+  const memPct = totalGib > 0 ? (usedGib / totalGib) * 100 : 0
   return (
     <div className="mb-stats">
-      <Gauge label="CPU" percent={cpu} value={`${Math.round(cpu)}%`} color={tone(stats.cpu)} />
-      <Gauge
-        label="RAM"
-        percent={memPct}
-        value={`${gib(stats.mem_used).toFixed(1)}/${Math.round(gib(stats.mem_total))} GB`}
-        color={ramTone(gib(stats.mem_used))}
-      />
+      {showStats && (
+        <>
+          <Gauge label="CPU" percent={cpu} value={`${Math.round(cpu)}%`} color={tone(stats.cpu)} />
+          <Gauge
+            label="RAM"
+            percent={memPct}
+            value={`${usedGib.toFixed(1)}/${Math.round(totalGib)} GB`}
+            color={ramTone(usedGib)}
+          />
+        </>
+      )}
+      {showNet && (
+        <div className="mb-net" title={`Network — down ${rate(stats.net_down)} / up ${rate(stats.net_up)}`}>
+          <span className="mb-net-item">
+            <span className="mb-net-arrow down">↓</span>
+            {rate(stats.net_down)}
+          </span>
+          <span className="mb-net-item">
+            <span className="mb-net-arrow up">↑</span>
+            {rate(stats.net_up)}
+          </span>
+        </div>
+      )}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { notify } from './notificationStore'
 const DEFAULT_WALLPAPER = 'wp-aurora-blue.png'
 const urlFor = (id: string) => `/static/wallpapers/${id}`
 const MENU_STATS_KEY = 'menubarStats'
+const MENU_NET_KEY = 'menubarNet'
 
 interface DesktopState {
   wallpaperId: string | null
@@ -15,6 +16,8 @@ interface DesktopState {
   loading: boolean
   showMenuStats: boolean
   setMenuStats: (v: boolean) => void
+  showMenuNet: boolean
+  setMenuNet: (v: boolean) => void
   loadWallpapers: () => Promise<void>
   setWallpaper: (id: string) => Promise<void>
   addUploaded: (wp: Wallpaper) => void
@@ -31,6 +34,13 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   setMenuStats(v) {
     storage.set(MENU_STATS_KEY, v)
     set({ showMenuStats: v })
+  },
+
+  showMenuNet: storage.get<boolean>(MENU_NET_KEY, true),
+
+  setMenuNet(v) {
+    storage.set(MENU_NET_KEY, v)
+    set({ showMenuNet: v })
   },
 
   async loadWallpapers() {

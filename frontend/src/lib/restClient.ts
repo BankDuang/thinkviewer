@@ -115,6 +115,14 @@ export function logout(): Promise<{ success: boolean }> {
 export const getInfo = () => bearerJson<DeviceInfo>('GET', '/api/info')
 export const getStats = () => bearerJson<SystemStats>('GET', '/api/stats')
 export const getPublicIp = () => bearerJson<{ ip: string | null }>('GET', '/api/public-ip')
+// Financial app (embedded FinanceHub service)
+export const financeStatus = () =>
+  bearerJson<{ running: boolean; port: number; available: boolean; autologin_token?: string }>(
+    'GET',
+    '/api/finance/status',
+  )
+export const financeStart = () =>
+  bearerJson<{ running: boolean; port: number; available?: boolean; error?: string }>('POST', '/api/finance/start')
 export const getMe = () => bearerJson<User>('GET', '/api/me')
 
 // --- Users (admin-only management; Bearer) ---------------------------------

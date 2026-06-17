@@ -14,12 +14,14 @@ interface CrudSectionProps {
   spec: CpSpec
   /** when set, only show rows matching this filter (e.g. {project_id}) */
   fixedFilter?: Record<string, string>
+  /** notified after any create/update/delete/toggle so parents can refresh counts */
+  onChange?: () => void
 }
 
 // undefined = form closed, null = creating, record = editing
 type Editing = CpRecord | null | undefined
 
-export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
+export function CrudSection({ spec, fixedFilter, onChange }: CrudSectionProps) {
   const { refreshRelations } = useCp()
   const [rows, setRows] = useState<CpRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,11 +64,12 @@ export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
         notify('ok', `Deleted “${label}”`)
         if (spec.entity === 'clients' || spec.entity === 'projects') refreshRelations()
         load()
+        onChange?.()
       } catch (e) {
         notify('error', e instanceof api.ApiError ? e.message : 'Could not delete')
       }
     },
-    [spec.entity, spec.titleField, load, refreshRelations],
+    [spec.entity, spec.titleField, load, refreshRelations, onChange],
   )
 
   const onToggle = useCallback(
@@ -74,12 +77,13 @@ export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
       setRows((prev) => prev.map((r) => (r.id === rec.id ? { ...r, [col.key]: next } : r)))
       try {
         await api.cpUpdate(spec.entity, String(rec.id), { [col.key]: next })
+        onChange?.()
       } catch (e) {
         notify('error', e instanceof api.ApiError ? e.message : 'Could not update')
         load() // revert optimistic change
       }
     },
-    [spec.entity, load],
+    [spec.entity, load, onChange],
   )
 
   return (
@@ -130,7 +134,10 @@ export function CrudSection({ spec, fixedFilter }: CrudSectionProps) {
             spec={spec}
             initial={editing ?? { ...(fixedFilter ?? {}) }}
             onClose={() => setEditing(undefined)}
-            onSaved={() => load()}
+            onSaved={() => {
+              load()
+              onChange?.()
+            }}
           />
         )}
       </AnimatePresence>

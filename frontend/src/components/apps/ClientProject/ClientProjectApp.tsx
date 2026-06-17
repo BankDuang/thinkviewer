@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import clsx from 'clsx'
 import type { AppProps } from '@/types'
+import * as api from '@/lib/restClient'
 import { Icon, type IconName } from '@/components/common/Icon'
 import { CpProvider } from './CpContext'
 import { CrudSection } from './CrudSection'
@@ -42,6 +43,24 @@ export function ClientProjectApp(_props: AppProps) {
   const [active, setActive] = useState('dashboard')
   const item = NAV.find((n) => n.key === active) ?? NAV[0]
 
+  // open (not-yet-done) counts per section, shown as highlighted nav badges
+  const [open, setOpen] = useState<Record<string, number>>({})
+  const refreshCounts = useCallback(() => {
+    api
+      .cpDashboard()
+      .then((d) =>
+        setOpen({
+          requirements: d.requirements_open,
+          tasks: d.tasks_open,
+          issues: d.issues_open,
+          change_requests: d.cr_open,
+        }),
+      )
+      .catch(() => {})
+  }, [])
+  // refresh on mount and whenever the user switches section (cheap COUNT query)
+  useEffect(() => refreshCounts(), [refreshCounts, active])
+
   return (
     <CpProvider>
       <div className="cp-root">
@@ -59,6 +78,7 @@ export function ClientProjectApp(_props: AppProps) {
               >
                 <Icon name={n.icon} size={16} />
                 <span>{n.label}</span>
+                {open[n.key] > 0 && <span className="cp-nav-badge">{open[n.key]}</span>}
               </button>
             ))}
           </div>

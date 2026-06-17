@@ -104,7 +104,7 @@ DEFAULT_SERVERS_DIR = os.path.realpath(
 SERVER_LOG_DIR = os.path.join(BASE_DIR, "server_logs")
 ENTRY_CANDIDATES = ("run.py", "main.py", "app.py", "server.py", "wsgi.py", "asgi.py")
 # Apps a user can be granted visibility of (mirrors the frontend AppKind union).
-APP_KINDS = ["remote", "terminal", "files", "settings", "servers", "clientproject", "notes"]
+APP_KINDS = ["remote", "terminal", "files", "settings", "servers", "clientproject", "notes", "finance"]
 
 # ---- Client Project (CRM + project tracking) "app" --------------------------
 CP_FILES_DIR = os.path.join(BASE_DIR, "client_project_files")
@@ -472,7 +472,9 @@ def init_db():
     # Notes app (standalone — not the CRM's cp_notes): note + checklist + images.
     c.execute("""CREATE TABLE IF NOT EXISTS notes (
         id TEXT PRIMARY KEY, title TEXT, body TEXT, checklist TEXT, images TEXT,
-        pinned TEXT, color TEXT, created_at TEXT, updated_at TEXT)""")
+        pinned TEXT, color TEXT, deadline TEXT, created_at TEXT, updated_at TEXT)""")
+    if "deadline" not in {r[1] for r in c.execute("PRAGMA table_info(notes)").fetchall()}:
+        c.execute("ALTER TABLE notes ADD COLUMN deadline TEXT")  # migrate older DBs
 
     # Users + per-user app visibility (admin = the connection password)
     c.execute("""CREATE TABLE IF NOT EXISTS users (
@@ -2139,8 +2141,32 @@ async def get_info(request: Request):
     }
 
 
+_net_prev = {"sent": None, "recv": None, "ts": None}
+
+
+def _net_rates():
+    """Network up/down in bytes/sec since the previous call (None until 2 samples
+    or if psutil is unavailable)."""
+    try:
+        import psutil
+        io = psutil.net_io_counters()
+        now = time.monotonic()
+        up = down = 0.0
+        if _net_prev["ts"] is not None:
+            dt = now - _net_prev["ts"]
+            if dt > 0:
+                up = max(0.0, (io.bytes_sent - _net_prev["sent"]) / dt)
+                down = max(0.0, (io.bytes_recv - _net_prev["recv"]) / dt)
+        _net_prev["sent"], _net_prev["recv"], _net_prev["ts"] = io.bytes_sent, io.bytes_recv, now
+        return round(up), round(down)
+    except Exception:
+        return None, None
+
+
 def _system_stats() -> dict:
-    """Host CPU% + RAM (bytes). Uses psutil when available; native fallback else."""
+    """Host CPU% + RAM (bytes) + network up/down (bytes/sec). Uses psutil when
+    available; native fallback else."""
+    net_up, net_down = _net_rates()
     try:
         import psutil
         vm = psutil.virtual_memory()
@@ -2149,6 +2175,8 @@ def _system_stats() -> dict:
             "mem_used": int(vm.used),
             "mem_total": int(vm.total),
             "mem_percent": round(vm.percent, 1),
+            "net_up": net_up,
+            "net_down": net_down,
         }
     except Exception:
         pass
@@ -2181,7 +2209,8 @@ def _system_stats() -> dict:
             mem_percent = round(mem_used / mem_total * 100, 1) if mem_total else None
     except Exception:
         pass
-    return {"cpu": cpu, "mem_used": mem_used, "mem_total": mem_total, "mem_percent": mem_percent}
+    return {"cpu": cpu, "mem_used": mem_used, "mem_total": mem_total, "mem_percent": mem_percent,
+            "net_up": net_up, "net_down": net_down}
 
 
 @app.get("/api/stats")
@@ -3091,7 +3120,8 @@ async def cp_dashboard(request: Request):
             "issues_critical": s("SELECT COUNT(*) FROM cp_issues WHERE severity='critical' AND status NOT IN ('verified','closed')"),
             "tasks_open": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done')"),
             "tasks_overdue": s("SELECT COUNT(*) FROM cp_tasks WHERE status NOT IN ('done') AND due_date<>'' AND due_date < ?", today),
-            "cr_open": s("SELECT COUNT(*) FROM cp_change_requests WHERE status='requested'"),
+            "requirements_open": s("SELECT COUNT(*) FROM cp_requirements WHERE status NOT IN ('done')"),
+            "cr_open": s("SELECT COUNT(*) FROM cp_change_requests WHERE status NOT IN ('done','rejected')"),
             "total_budget": s("SELECT COALESCE(SUM(CAST(NULLIF(budget,'') AS REAL)),0) FROM cp_projects"),
             "outstanding": s("SELECT COALESCE(SUM(CAST(NULLIF(amount,'') AS REAL)),0) FROM cp_payments WHERE COALESCE(paid,'0') NOT IN ('1','true','True')"),
         }
@@ -3288,7 +3318,7 @@ async def cp_delete(entity: str, rid: str, request: Request):
 # Notes app — standalone notes + checklists + image attachments
 # ============================================================
 NOTES_JSON = ("checklist", "images")        # JSON-encoded columns
-NOTE_COLS = ("title", "body", "checklist", "images", "pinned", "color")
+NOTE_COLS = ("title", "body", "checklist", "images", "pinned", "color", "deadline")
 
 
 def _note_to_dict(row) -> dict:
@@ -3303,7 +3333,7 @@ def _note_to_dict(row) -> dict:
         else:
             d[k] = []
     # never leak SQL NULL for scalar columns — keep the frontend's string contract
-    for k in ("title", "body", "pinned", "color", "created_at", "updated_at"):
+    for k in ("title", "body", "pinned", "color", "deadline", "created_at", "updated_at"):
         if d.get(k) is None:
             d[k] = ""
     return d
@@ -3325,7 +3355,9 @@ async def notes_list(request: Request):
         conn = get_db()
         rows = conn.execute(
             "SELECT * FROM notes ORDER BY "
-            "CASE WHEN pinned IN ('1','true','True') THEN 0 ELSE 1 END, "
+            "CASE WHEN pinned IN ('1','true','True') THEN 0 ELSE 1 END, "      # pinned first
+            "CASE WHEN deadline IS NULL OR deadline='' THEN 1 ELSE 0 END, "    # dated before undated
+            "deadline ASC, "                                                  # soonest deadline first
             "updated_at DESC").fetchall()
         conn.close()
         return [_note_to_dict(r) for r in rows]
@@ -3454,6 +3486,82 @@ async def notes_upload(file: UploadFile = File(...), token: str = Form("")):
             pass
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
     return {"path": stored, "name": raw}
+
+
+# ============================================================
+# Financial app — embedded FinanceHub (Flask) run as a local service.
+# We run the real app (own venv) on a loopback port; the Financial desktop
+# app embeds it in an iframe so it behaves exactly like the real site with
+# real data + PDF/document export.
+# ============================================================
+FINANCE_DIR = os.path.join(BASE_DIR, "FinanceHub")
+FINANCE_PORT = int(os.getenv("THINKVIEWER_FINANCE_PORT", "19092"))
+# random per-process SSO token handed to FinanceHub so the embed skips its login
+FINANCE_AUTOLOGIN_TOKEN = secrets.token_urlsafe(24)
+_finance_lock = threading.Lock()
+_finance_proc = None
+
+
+def _finance_python():
+    p = os.path.join(FINANCE_DIR, ".venv", "bin", "python")
+    return p if os.path.isfile(p) else None
+
+
+def _finance_port_open():
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", FINANCE_PORT), timeout=0.4):
+            return True
+    except OSError:
+        return False
+
+
+def finance_start():
+    """Spawn FinanceHub (Flask) on a loopback port if not already up."""
+    global _finance_proc
+    with _finance_lock:
+        if _finance_port_open():
+            return {"running": True, "port": FINANCE_PORT}
+        # a previous spawn may still be booting (Flask cold-start takes a few
+        # seconds) — don't start a second, doomed process in that window
+        if _finance_proc is not None and _finance_proc.poll() is None:
+            return {"running": False, "port": FINANCE_PORT, "starting": True}
+        py = _finance_python()
+        if not py or not os.path.isfile(os.path.join(FINANCE_DIR, "app.py")):
+            return {"running": False, "port": FINANCE_PORT,
+                    "available": False,
+                    "error": "FinanceHub is not set up (missing .venv or app.py)."}
+        os.makedirs(SERVER_LOG_DIR, exist_ok=True)
+        logf = open(os.path.join(SERVER_LOG_DIR, "finance.log"), "a")
+        env = dict(os.environ)
+        # WeasyPrint (PDF export) loads Homebrew's pango/cairo dylibs at runtime
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = "/opt/homebrew/lib:" + env.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+        env["TV_AUTOLOGIN_TOKEN"] = FINANCE_AUTOLOGIN_TOKEN  # SSO for the embed
+        try:
+            _finance_proc = subprocess.Popen(
+                [py, "-m", "flask", "--app", "app", "run", "--host", "127.0.0.1", "--port", str(FINANCE_PORT)],
+                cwd=FINANCE_DIR, stdout=logf, stderr=subprocess.STDOUT,
+                start_new_session=True, env=env)
+        except Exception as e:
+            return {"running": False, "port": FINANCE_PORT, "available": True, "error": f"Could not start: {e}"}
+        return {"running": True, "port": FINANCE_PORT, "starting": True}
+
+
+def finance_status():
+    return {"running": _finance_port_open(), "port": FINANCE_PORT,
+            "available": bool(_finance_python()), "autologin_token": FINANCE_AUTOLOGIN_TOKEN}
+
+
+@app.get("/api/finance/status")
+async def finance_status_ep(request: Request):
+    _require_token(request)
+    return await asyncio.to_thread(finance_status)
+
+
+@app.post("/api/finance/start")
+async def finance_start_ep(request: Request):
+    _require_token(request)
+    return await asyncio.to_thread(finance_start)
 
 
 # ============================================================

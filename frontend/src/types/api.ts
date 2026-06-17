@@ -58,6 +58,8 @@ export interface SystemStats {
   mem_used: number | null // bytes
   mem_total: number | null // bytes
   mem_percent: number | null // 0..100
+  net_up: number | null // bytes/sec sent
+  net_down: number | null // bytes/sec received
 }
 
 export interface LoginResp {
@@ -198,6 +200,7 @@ export interface Note {
   images: string[]
   pinned: string // '0' | '1'
   color: string
+  deadline: string // 'YYYY-MM-DD' or ''
   created_at: string
   updated_at: string
 }
@@ -215,6 +218,7 @@ export interface CpDashboard {
   issues_critical: number
   tasks_open: number
   tasks_overdue: number
+  requirements_open: number
   cr_open: number
   total_budget: number
   outstanding: number

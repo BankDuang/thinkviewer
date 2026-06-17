@@ -194,6 +194,7 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
   const [tasks, setTasks] = useState<CpRecord[]>([])
   const [reqs, setReqs] = useState<CpRecord[]>([])
   const [issues, setIssues] = useState<CpRecord[]>([])
+  const [crs, setCrs] = useState<CpRecord[]>([])
   const [tab, setTab] = useState('overview')
   const [editing, setEditing] = useState(false)
 
@@ -203,12 +204,14 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
       api.cpList('tasks', { project_id: projectId }),
       api.cpList('requirements', { project_id: projectId }),
       api.cpList('issues', { project_id: projectId }),
+      api.cpList('change_requests', { project_id: projectId }),
     ])
-      .then(([p, t, r, i]) => {
+      .then(([p, t, r, i, c]) => {
         setProject(p.items[0] ?? null)
         setTasks(t.items)
         setReqs(r.items)
         setIssues(i.items)
+        setCrs(c.items)
       })
       .catch(() => {})
   }, [projectId])
@@ -217,6 +220,13 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
   const progress = cpProgress(tasks, reqs)
   const clientName = String(clients.find((c) => String(c.id) === String(project?.client_id))?.name ?? '—')
   const openIssues = issues.filter((x) => !['verified', 'closed'].includes(String(x.status))).length
+  // count of not-yet-done cases per tab (shown as a highlighted badge)
+  const tabOpen: Record<string, number> = {
+    requirements: reqs.filter((r) => String(r.status) !== 'done').length,
+    tasks: tasks.filter((t) => String(t.status) !== 'done').length,
+    issues: openIssues,
+    change_requests: crs.filter((c) => !['done', 'rejected'].includes(String(c.status))).length,
+  }
 
   if (!project) {
     return (
@@ -286,6 +296,7 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
           <button key={t.key} className={clsx('cp-tab', tab === t.key && 'is-active')} onClick={() => setTab(t.key)}>
             <Icon name={t.icon} size={14} />
             {t.label}
+            {tabOpen[t.key] > 0 && <span className="cp-count-badge">{tabOpen[t.key]}</span>}
           </button>
         ))}
       </div>
@@ -314,10 +325,14 @@ export function ProjectDetail({ projectId, onBack }: { projectId: string; onBack
           </div>
         )}
         {tab === 'requirements' && <RequirementsChecklist projectId={projectId} onChange={loadHead} />}
-        {tab === 'tasks' && <CrudSection spec={CP_SPECS.tasks} fixedFilter={{ project_id: projectId }} />}
-        {tab === 'issues' && <CrudSection spec={CP_SPECS.issues} fixedFilter={{ project_id: projectId }} />}
+        {tab === 'tasks' && (
+          <CrudSection spec={CP_SPECS.tasks} fixedFilter={{ project_id: projectId }} onChange={loadHead} />
+        )}
+        {tab === 'issues' && (
+          <CrudSection spec={CP_SPECS.issues} fixedFilter={{ project_id: projectId }} onChange={loadHead} />
+        )}
         {tab === 'change_requests' && (
-          <CrudSection spec={CP_SPECS.change_requests} fixedFilter={{ project_id: projectId }} />
+          <CrudSection spec={CP_SPECS.change_requests} fixedFilter={{ project_id: projectId }} onChange={loadHead} />
         )}
         {tab === 'phases' && <CrudSection spec={CP_SPECS.phases} fixedFilter={{ project_id: projectId }} />}
         {tab === 'notes' && <CrudSection spec={CP_SPECS.notes} fixedFilter={{ project_id: projectId }} />}

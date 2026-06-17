@@ -51,6 +51,7 @@ export type IconName =
   | 'bug'
   | 'money'
   | 'chart-bar'
+  | 'calendar'
 
 const GLYPHS: Record<IconName, JSX.Element> = {
   close: <path d="M6 6l12 12M18 6L6 18" />,
@@ -145,6 +146,12 @@ const GLYPHS: Record<IconName, JSX.Element> = {
       <rect x="7" y="12" width="3" height="5" />
       <rect x="12" y="8" width="3" height="9" />
       <rect x="17" y="14" width="3" height="3" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="4" y="5" width="16" height="16" rx="2" />
+      <path d="M4 9h16M8 3v4M16 3v4" />
     </>
   ),
   trash: <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m2 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7" />,

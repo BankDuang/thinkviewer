@@ -120,6 +120,31 @@
   font-variant-numeric: tabular-nums;
   min-width: 30px;
 }
+.mb-net {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+.mb-net-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 62px; /* stable width as the rate fluctuates */
+}
+.mb-net-arrow {
+  font-size: 12px;
+  line-height: 1;
+}
+.mb-net-arrow.down {
+  color: #34c759;
+}
+.mb-net-arrow.up {
+  color: #5e9aff;
+}
 .menubar-dot {
   width: 8px;
   height: 8px;

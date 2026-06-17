@@ -76,6 +76,8 @@ export function StreamSettingsPanel() {
   const setSettings = useStreamStore((s) => s.setSettings)
   const showMenuStats = useDesktopStore((s) => s.showMenuStats)
   const setMenuStats = useDesktopStore((s) => s.setMenuStats)
+  const showMenuNet = useDesktopStore((s) => s.showMenuNet)
+  const setMenuNet = useDesktopStore((s) => s.setMenuNet)
 
   return (
     <>
@@ -139,6 +141,22 @@ export function StreamSettingsPanel() {
               aria-label="Show CPU / RAM in menu bar"
               className={`set-switch${showMenuStats ? ' is-on' : ''}`}
               onClick={() => setMenuStats(!showMenuStats)}
+            >
+              <span className="set-switch-knob" />
+            </button>
+          </div>
+          <div className="set-toggle-row">
+            <span className="set-toggle-text">
+              <span className="set-toggle-name">Show network</span>
+              <span className="set-toggle-sub">Live internet up / down speed in the top menu bar</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showMenuNet}
+              aria-label="Show network speed in menu bar"
+              className={`set-switch${showMenuNet ? ' is-on' : ''}`}
+              onClick={() => setMenuNet(!showMenuNet)}
             >
               <span className="set-switch-knob" />
             </button>

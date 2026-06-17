@@ -23,6 +23,26 @@ function relTime(iso: string): string {
   return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+function todayStr(): string {
+  const d = new Date()
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+function dueLabel(d: string): string {
+  if (!d) return ''
+  const dt = new Date(d + 'T00:00:00')
+  if (Number.isNaN(dt.getTime())) return d
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+// '' (none) | 'is-overdue' (past) | 'is-today' | 'is-soon' (within 3 days) | ''
+function dueClass(d: string): string {
+  if (!d) return ''
+  const t = todayStr()
+  if (d < t) return 'is-overdue'
+  if (d === t) return 'is-today'
+  return ''
+}
+
 function preview(n: Note): string {
   const line = (n.body || '').split('\n').map((s) => s.trim()).find(Boolean)
   if (line) return line
@@ -237,8 +257,12 @@ export function NotesApp(_props: AppProps) {
     return [...arr].sort((a, b) => {
       const pa = a.pinned === '1' ? 0 : 1
       const pb = b.pinned === '1' ? 0 : 1
-      if (pa !== pb) return pa - pb
-      return (b.updated_at || '').localeCompare(a.updated_at || '')
+      if (pa !== pb) return pa - pb // pinned first
+      const da = a.deadline || ''
+      const db = b.deadline || ''
+      if (!!da !== !!db) return da ? -1 : 1 // notes with a deadline before those without
+      if (da && db && da !== db) return da < db ? -1 : 1 // soonest deadline first
+      return (b.updated_at || '').localeCompare(a.updated_at || '') // then most recent
     })
   }, [notes, query])
 
@@ -262,7 +286,13 @@ export function NotesApp(_props: AppProps) {
   // patch a note locally; persist text on a debounce, structured fields immediately
   const patch = useCallback(
     (id: string, fields: Partial<Note>, immediate = false) => {
-      setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...fields } : n)))
+      // keep notesRef authoritative *synchronously* so a blur/flush firing in the
+      // same tick as this edit never reads a stale title/body
+      setNotes((prev) => {
+        const next = prev.map((n) => (n.id === id ? { ...n, ...fields } : n))
+        notesRef.current = next
+        return next
+      })
       if (immediate) {
         api
           .updateNote(id, fields)
@@ -293,7 +323,7 @@ export function NotesApp(_props: AppProps) {
   const newNote = async () => {
     flushSave()
     try {
-      const n = await api.createNote({ title: '', body: '', checklist: [], images: [], pinned: '0', color: '' })
+      const n = await api.createNote({ title: '', body: '', checklist: [], images: [], pinned: '0', color: '', deadline: '' })
       setNotes((prev) => [n, ...prev])
       setSelectedId(n.id)
       focusNew.current = true
@@ -375,6 +405,12 @@ export function NotesApp(_props: AppProps) {
                 <div className="notes-item-main">
                   <div className="notes-item-top">
                     <span className="notes-item-title">{n.title || 'New Note'}</span>
+                    {n.deadline && (
+                      <span className={clsx('notes-due', dueClass(n.deadline))}>
+                        <Icon name="calendar" size={10} />
+                        {dueLabel(n.deadline)}
+                      </span>
+                    )}
                     {n.pinned === '1' && <Icon name="signal" size={11} className="notes-item-pin" />}
                   </div>
                   <div className="notes-item-sub">
@@ -410,6 +446,24 @@ export function NotesApp(_props: AppProps) {
                     title={c ? 'Color' : 'No color'}
                   />
                 ))}
+              </div>
+              <div className={clsx('notes-deadline', selected.deadline && dueClass(selected.deadline))}>
+                <Icon name="calendar" size={14} />
+                <input
+                  type="date"
+                  value={selected.deadline || ''}
+                  onChange={(e) => patch(selected.id, { deadline: e.target.value }, true)}
+                  title="Deadline"
+                />
+                {selected.deadline && (
+                  <button
+                    className="notes-deadline-clear"
+                    onClick={() => patch(selected.id, { deadline: '' }, true)}
+                    aria-label="Clear deadline"
+                  >
+                    <Icon name="close" size={11} strokeWidth={2.4} />
+                  </button>
+                )}
               </div>
               <div className="notes-bar-spacer" />
               <button

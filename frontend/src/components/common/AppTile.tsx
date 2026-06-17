@@ -78,6 +78,17 @@ const TILES: Record<AppKind, TileDef> = {
       </g>
     ),
   },
+  finance: {
+    from: '#34d99b',
+    to: '#0c8f63',
+    glyph: (
+      <g fill="none" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 37l8-8 6 5 12-13" />
+        <path d="M35 21h6v6" />
+        <path d="M15 16v25h26" stroke="#fff" strokeOpacity="0.55" />
+      </g>
+    ),
+  },
   clientproject: {
     from: '#b07cff',
     to: '#6d28d9',

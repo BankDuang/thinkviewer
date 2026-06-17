@@ -42,3 +42,6 @@ notes_files/
 # Frontend local env (never commit secrets to the client)
 frontend/.env
 frontend/.env.*
+
+# Embedded FinanceHub app (separate nested repo + its own venv/data)
+FinanceHub/

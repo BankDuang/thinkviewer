@@ -224,6 +224,77 @@
   background: rgba(255, 69, 58, 0.16);
   color: #ff6b6b;
 }
+
+/* deadline control (editor toolbar) */
+.notes-deadline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  padding: 3px 5px 3px 8px;
+  border-radius: var(--r-pill);
+  background: var(--hover);
+  color: var(--text-dim);
+}
+.notes-deadline input[type='date'] {
+  color-scheme: dark;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0;
+}
+.notes-deadline.is-overdue {
+  background: rgba(255, 69, 58, 0.16);
+  color: #ff8b82;
+}
+.notes-deadline.is-overdue input[type='date'] {
+  color: #ff8b82;
+}
+.notes-deadline.is-today {
+  background: rgba(255, 159, 10, 0.16);
+  color: #ffc46b;
+}
+.notes-deadline.is-today input[type='date'] {
+  color: #ffc46b;
+}
+.notes-deadline-clear {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: inherit;
+  opacity: 0.7;
+}
+.notes-deadline-clear:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* sidebar "due" chip */
+.notes-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--hover);
+  color: var(--text-dim);
+}
+.notes-due.is-overdue {
+  background: rgba(255, 69, 58, 0.18);
+  color: #ff8b82;
+}
+.notes-due.is-today {
+  background: rgba(255, 159, 10, 0.18);
+  color: #ffc46b;
+}
 .notes-title {
   background: none;
   border: none;
