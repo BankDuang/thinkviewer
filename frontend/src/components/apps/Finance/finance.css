@@ -1,5 +1,6 @@
-/* Native Financial app — reuses the ClientProject design system (cp-*) + adds fin-* */
-@import '../ClientProject/cp.css';
+/* Native Financial app — uses the shared App Kit primitives (cp-*) + adds fin-*.
+ * No dependency on any other app's CSS; the kit lives in src/styles/appkit.css. */
+@import '../../../styles/appkit.css';
 
 .fin-root .fin-logo {
   display: inline-flex;
