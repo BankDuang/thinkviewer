@@ -8,6 +8,7 @@ const DEFAULT_WALLPAPER = 'wp-aurora-blue.png'
 const urlFor = (id: string) => `/static/wallpapers/${id}`
 const MENU_STATS_KEY = 'menubarStats'
 const MENU_NET_KEY = 'menubarNet'
+const DOCK_HIDDEN_KEY = 'dockHidden'
 
 interface DesktopState {
   wallpaperId: string | null
@@ -18,6 +19,8 @@ interface DesktopState {
   setMenuStats: (v: boolean) => void
   showMenuNet: boolean
   setMenuNet: (v: boolean) => void
+  dockHidden: boolean
+  setDockHidden: (v: boolean) => void
   loadWallpapers: () => Promise<void>
   setWallpaper: (id: string) => Promise<void>
   addUploaded: (wp: Wallpaper) => void
@@ -41,6 +44,13 @@ export const useDesktopStore = create<DesktopState>((set, get) => ({
   setMenuNet(v) {
     storage.set(MENU_NET_KEY, v)
     set({ showMenuNet: v })
+  },
+
+  dockHidden: storage.get<boolean>(DOCK_HIDDEN_KEY, false),
+
+  setDockHidden(v) {
+    storage.set(DOCK_HIDDEN_KEY, v)
+    set({ dockHidden: v })
   },
 
   async loadWallpapers() {

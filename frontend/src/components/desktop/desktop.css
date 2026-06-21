@@ -265,6 +265,85 @@
   opacity: 1;
 }
 
+/* hide / reveal */
+.dock {
+  transition: transform 0.34s var(--ease-out), opacity 0.24s ease;
+}
+.dock-wrap.is-hidden .dock {
+  transform: translateY(calc(100% + 18px));
+  opacity: 0;
+  pointer-events: none;
+}
+.dock-wrap.is-hidden.is-visible .dock {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.dock-sep {
+  align-self: center;
+  width: 1px;
+  height: 30px;
+  margin: 0 2px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.dock-hide {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 46px;
+  border: 0;
+  border-radius: 11px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.05);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.dock-hide:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+/* full-width hover strip at the very bottom edge to summon a hidden dock */
+.dock-reveal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 10px;
+  z-index: 7990;
+  pointer-events: auto;
+}
+/* grab handle that stays at the edge while hidden */
+.dock-show {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.dock-show-bar {
+  width: 46px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.38);
+  transition: background var(--dur-fast), width var(--dur-fast);
+}
+.dock-show:hover .dock-show-bar {
+  background: rgba(255, 255, 255, 0.72);
+  width: 56px;
+}
+
 /* Snap-zone hint overlay */
 .snap-hint {
   position: absolute;

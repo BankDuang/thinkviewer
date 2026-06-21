@@ -7,6 +7,8 @@ export type ModKey = 'ctrl' | 'alt' | 'shift' | 'command'
 
 export type ClientMsg =
   | { type: 'auth'; token: string }
+  | { type: 'stream_start' }
+  | { type: 'stream_stop' }
   | { type: 'stream_settings'; quality?: number; fps?: number; scale?: number }
   | { type: 'mouse_move'; x: number; y: number }
   | { type: 'mouse_down'; x: number; y: number; button: Button }

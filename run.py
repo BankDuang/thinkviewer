@@ -2253,11 +2253,12 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close()
         return
 
-    # Wake screen and prevent sleep
-    wake_screen()
-    keep_awake_start()
-
-    streamer.clients.add(websocket)
+    # NOTE: do NOT start screen streaming here. Capturing + JPEG-encoding +
+    # pushing frames to a client is only needed while the Remote Desktop app is
+    # actually open. Streaming on every connection wastes host CPU and a lot of
+    # client bandwidth (a keepalive frame every 2s + full fps on any screen
+    # change) even when the user is just looking at the desktop. The client now
+    # opts in with `stream_start` (and out with `stream_stop`) — see below.
     _all_ws.add(websocket)
     await websocket.send_json({
         "type": "auth_ok",
@@ -2271,7 +2272,18 @@ async def websocket_endpoint(websocket: WebSocket):
             data = json.loads(raw)
             msg_type = data.get("type", "")
 
-            if msg_type == "stream_settings":
+            if msg_type == "stream_start":
+                # Remote Desktop app opened → start streaming to this client.
+                wake_screen()
+                keep_awake_start()
+                streamer._prev_frame_hash = None  # force an immediate fresh frame
+                streamer.clients.add(websocket)
+            elif msg_type == "stream_stop":
+                # Remote Desktop app closed → stop streaming to this client.
+                streamer.clients.discard(websocket)
+                if not streamer.clients:
+                    keep_awake_stop()
+            elif msg_type == "stream_settings":
                 streamer.update_settings(
                     quality=data.get("quality"),
                     fps=data.get("fps"),
@@ -3572,6 +3584,18 @@ async def finance_status_ep(request: Request):
 async def finance_start_ep(request: Request):
     _require_token(request)
     return await asyncio.to_thread(finance_start)
+
+
+# ============================================================
+# Native Financial app backend (FastAPI router over FinanceHub/instance/invoice.db).
+# Guarded so a finance issue can never block ThinkViewer startup.
+# ============================================================
+try:
+    from finance_api import router as _finance_router
+    app.include_router(_finance_router)
+    print("[finance] /api/fin router loaded", flush=True)
+except Exception as _fin_e:  # pragma: no cover
+    print(f"[finance] router NOT loaded: {_fin_e}", flush=True)
 
 
 # ============================================================

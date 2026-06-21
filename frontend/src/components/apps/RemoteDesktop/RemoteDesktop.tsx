@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppProps } from '@/types'
 import { Icon } from '@/components/common/Icon'
+import { ws } from '@/lib/wsClient'
 import { frameSink } from '@/lib/frameSink'
 import { useStreamStore } from '@/store/streamStore'
 import { useConnectionStore } from '@/store/connectionStore'
@@ -19,6 +20,14 @@ export function RemoteDesktop({ focused }: AppProps) {
   const [hasFrame, setHasFrame] = useState(() => frameSink.getDims().width > 0)
 
   useRemoteInput(canvasRef, controlling, focused)
+
+  // Screen streaming runs ONLY while this app is open. Opt in on open / on
+  // (re)connect, and opt out when the window closes, so the host isn't capturing
+  // + streaming the desktop (and burning client bandwidth) the rest of the time.
+  useEffect(() => {
+    if (status === 'open') ws.send({ type: 'stream_start' })
+    return () => ws.send({ type: 'stream_stop' })
+  }, [status])
 
   // First decoded frame flips the "waiting for video" state off.
   useEffect(() => frameSink.onDims((w, h) => setHasFrame(w > 0 && h > 0)), [])
