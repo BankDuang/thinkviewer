@@ -11,13 +11,16 @@ identical so the moved endpoints behave exactly as before.
 """
 import os
 import json
+import socket
 import sqlite3
+import subprocess
 
 from fastapi import Request, HTTPException
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "thinkviewer.db")
 MAX_UPLOAD_BYTES = int(os.getenv("THINKVIEWER_MAX_UPLOAD_MB", "2048")) * 1024 * 1024
+SERVER_LOG_DIR = os.path.join(BASE_DIR, "server_logs")  # shared log dir (servers + finance)
 
 
 def get_db():
@@ -70,3 +73,50 @@ def actor(request: Request) -> str:
     """Username behind the request's token (for activity attribution), '' if none."""
     u = user_for_token(_token_of(request))
     return u["username"] if u else ""
+
+
+# ---- shared key/value settings (settings table) ---------------------------
+def get_setting(key):
+    conn = get_db()
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_setting(key, value):
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+    conn.close()
+
+
+# ---- shared process / network probes (servers + finance use these) --------
+def pid_alive(pid) -> bool:
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ProcessLookupError, ValueError):
+        return False
+
+
+def port_open(port):
+    """True/False if a TCP port is accepting connections, None if no port set."""
+    if not port:
+        return None
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.25):
+            return True
+    except OSError:
+        return False
+
+
+def public_ip():
+    """Best-effort public IP via ipify (None on failure)."""
+    try:
+        r = subprocess.run(["curl", "-sS", "--max-time", "5", "https://api.ipify.org"],
+                           capture_output=True, text=True, timeout=8)
+        return r.stdout.strip() or None
+    except Exception:
+        return None
