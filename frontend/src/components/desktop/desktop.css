@@ -314,34 +314,35 @@
   z-index: 7990;
   pointer-events: auto;
 }
-/* grab handle that stays at the edge while hidden */
+/* hidden → an up-chevron pill at the edge brings the dock back */
 .dock-show {
   position: absolute;
-  bottom: 2px;
+  bottom: 4px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 8001;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 70px;
-  height: 16px;
+  width: 58px;
+  height: 22px;
   padding: 0;
-  border: 0;
-  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 11px;
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(60, 62, 72, 0.5);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
   cursor: pointer;
   pointer-events: auto;
+  transition: background var(--dur-fast), color var(--dur-fast);
 }
-.dock-show-bar {
-  width: 46px;
-  height: 5px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.38);
-  transition: background var(--dur-fast), width var(--dur-fast);
+.dock-show:hover {
+  background: rgba(82, 84, 96, 0.72);
+  color: #fff;
 }
-.dock-show:hover .dock-show-bar {
-  background: rgba(255, 255, 255, 0.72);
-  width: 56px;
+.dock-chev-up {
+  transform: rotate(180deg);
 }
 
 /* Snap-zone hint overlay */

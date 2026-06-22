@@ -317,11 +317,13 @@
   border: none;
   outline: none;
   resize: none;
+  overflow: hidden;
+  flex-shrink: 0; /* keep the auto-grown height; let .notes-editor scroll instead */
   color: var(--text);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.65;
   font-family: inherit;
-  min-height: 120px;
+  min-height: 220px;
 }
 .notes-body::placeholder {
   color: var(--text-faint);

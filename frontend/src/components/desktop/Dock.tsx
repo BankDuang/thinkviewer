@@ -101,7 +101,7 @@ export function Dock() {
         </div>
       </div>
 
-      {/* persistent grab handle to bring the dock back (hover peeks, click pins it) */}
+      {/* hidden → an up-chevron pill brings the dock back (hover peeks, click pins it) */}
       {hidden && (
         <button
           className="dock-show"
@@ -110,7 +110,7 @@ export function Dock() {
           onMouseLeave={peekOff}
           onClick={() => setHidden(false)}
         >
-          <span className="dock-show-bar" />
+          <Icon name="chevron-down" size={16} className="dock-chev-up" />
         </button>
       )}
     </>

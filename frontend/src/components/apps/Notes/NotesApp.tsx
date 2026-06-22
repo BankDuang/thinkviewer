@@ -231,6 +231,7 @@ export function NotesApp(_props: AppProps) {
   const saveTimer = useRef<number>()
   const pasteHandler = useRef<((files: File[]) => void) | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
   const focusNew = useRef(false)
 
   const load = useCallback(() => {
@@ -267,6 +268,17 @@ export function NotesApp(_props: AppProps) {
   }, [notes, query])
 
   const selected = notes.find((n) => n.id === selectedId) ?? null
+
+  // Grow the body textarea to fit its content (like a real notes app) so the
+  // editor never traps text in a tiny box. Re-measure when switching notes.
+  const autosizeBody = useCallback((el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [])
+  useEffect(() => {
+    autosizeBody(bodyRef.current)
+  }, [selectedId, selected?.body, autosizeBody])
 
   const selectedIdRef = useRef<string | null>(null)
   selectedIdRef.current = selectedId
@@ -490,11 +502,12 @@ export function NotesApp(_props: AppProps) {
             <div className="notes-meta">Edited {relTime(selected.updated_at)} ago</div>
 
             <textarea
+              ref={bodyRef}
               className="notes-body"
               value={selected.body}
               placeholder="Start writing…"
               spellCheck={false}
-              onChange={(e) => patch(selected.id, { body: e.target.value })}
+              onChange={(e) => { patch(selected.id, { body: e.target.value }); autosizeBody(e.target) }}
               onBlur={flushSave}
             />
 
