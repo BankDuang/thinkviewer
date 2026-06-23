@@ -17,7 +17,11 @@ from fastapi import APIRouter, Request, HTTPException, UploadFile, File
 from fastapi.responses import Response, FileResponse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FIN_DIR = os.path.join(BASE_DIR, "FinanceHub")
+# The live FinanceHub (managed under the servers base dir) — its invoice.db is the
+# real data the native Financial app reads/writes, and its own venv + templates
+# render the PDFs/OCR via fin_helpers.py. Override with THINKVIEWER_FINANCE_DIR.
+FIN_DIR = os.path.realpath(os.path.expanduser(
+    os.getenv("THINKVIEWER_FINANCE_DIR", "~/Desktop/public_server/FinanceHub")))
 FIN_DB = os.path.join(FIN_DIR, "instance", "invoice.db")
 TV_DB = os.path.join(BASE_DIR, "thinkviewer.db")
 FIN_VENV_PY = os.path.join(FIN_DIR, ".venv", "bin", "python")
